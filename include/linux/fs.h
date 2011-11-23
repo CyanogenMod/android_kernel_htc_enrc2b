@@ -1435,6 +1435,7 @@ struct super_block {
 	u8 s_uuid[16];				/* UUID */
 
 	void 			*s_fs_info;	/* Filesystem private info */
+	unsigned int		s_max_links;
 	fmode_t			s_mode;
 
 	/* Granularity of c/m/atime in ns.
@@ -1746,6 +1747,19 @@ static inline void mark_inode_dirty(struct inode *inode)
 static inline void mark_inode_dirty_sync(struct inode *inode)
 {
 	__mark_inode_dirty(inode, I_DIRTY_SYNC);
+}
+
+/**
+ * set_nlink - directly set an inode's link count
+ * @inode: inode
+ * @nlink: new nlink (should be non-zero)
+ *
+ * This is a low-level filesystem helper to replace any
+ * direct filesystem manipulation of i_nlink.
+ */
+static inline void set_nlink(struct inode *inode, unsigned int nlink)
+{
+	inode->i_nlink = nlink;
 }
 
 /**
