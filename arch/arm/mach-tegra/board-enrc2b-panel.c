@@ -187,13 +187,13 @@ static p_tegra_dc_bl_output bl_output;
 
 #define ORIG_PWM_MAX 255
 #define ORIG_PWM_DEF 78
-#define ORIG_PWM_MIN 30
+#define ORIG_PWM_MIN 10
 
 #define MAP_PWM_MAX     255
 #define MAP_PWM_DEF     78
-#define MAP_PWM_MIN     7
+#define MAP_PWM_MIN     5
 
-#define MAP_PWM_LOW_DEF         79
+#define MAP_PWM_LOW_DEF         50
 #define MAP_PWM_HIGH_DEF        102
 
 static int max_pwm = MAP_PWM_MAX;
@@ -214,7 +214,7 @@ static unsigned char shrink_pwm(int val)
 	shrink_br = def_pwm +
 	(val-ORIG_PWM_DEF)*(max_pwm-def_pwm)/(ORIG_PWM_MAX-ORIG_PWM_DEF);
 
-	//pr_info("brightness orig = %d, transformed=%d\n", val, shrink_br);
+	//pr_info("[DISP]brightness orig = %d, transformed=%d\n", val, shrink_br);
 
 	return shrink_br;
 }
@@ -486,9 +486,6 @@ static struct tegra_dc_platform_data enrc2b_disp2_pdata = {
 	.default_out	= &enrc2b_disp2_out,
 	.fb		= &enrc2b_hdmi_fb_data,
 	.emc_clk_rate	= 300000000,
-#ifdef CONFIG_TEGRA_DC_CMU
-	.cmu_enable	= 1,
-#endif
 };
 
 static int enrc2b_dsi_panel_enable(void)
@@ -4255,7 +4252,7 @@ static void bkl_do_work(struct work_struct *work)
 {
 	struct backlight_device *bl = platform_get_drvdata(&enrc2b_disp1_backlight_device);
 	if (bl) {
-		DISP_DEBUG_LN("set backlight after resume");
+		DISP_DEBUG_LN("set backlight after resume %d", bl->props.brightness);
 		bl->props.bkl_on = 1;
 		backlight_update_status(bl);
 	}
@@ -4321,7 +4318,7 @@ static struct dentry *bkl_debugfs_root;
 
 static int bkl_calibration_get(void *data, u64 *val)
 {
-	DISP_INFO_LN("def_pwm = %d\n",def_pwm);
+	*val = (u64)def_pwm;
 	return 0;
 }
 
