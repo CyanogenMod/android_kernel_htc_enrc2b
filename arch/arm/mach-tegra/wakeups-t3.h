@@ -68,4 +68,6 @@
 #define TEGRA_WAKE_USB3_ID	37
 #define TEGRA_WAKE_USB3_VBUS	38
 
+#define TEGRA_WAKE_GPIO_PI6	43
+#define TEGRA_WAKE_GPIO_PW3	44
 #endif
