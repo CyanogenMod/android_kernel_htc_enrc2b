@@ -1038,7 +1038,7 @@ static int aic3008_set_config(int config_tbl, int idx, int en)
 		break;
 	case AIC3008_IO_CONFIG_MEDIA:
 
-        // maxwen TODO
+        /* thats actually a noop when using ICS drivers */
 		if(idx == 20)
 		{
 			mutex_unlock(&lock);
@@ -1700,6 +1700,11 @@ static int aic3008_dai_startup(struct snd_pcm_substream *substream,
 	 */
 	if (aic3008->master_substream) {
 		master_runtime = aic3008->master_substream->runtime;
+
+		/* dev_dbg(&spi->dev, "Constraining to %d bits\n",
+		 master_runtime->sample_bits); */
+		AUD_DBG("%p Constraining to %d bits\n", &spi->dev,
+				master_runtime->sample_bits);
 
 		snd_pcm_hw_constraint_minmax(substream->runtime,
 				SNDRV_PCM_HW_PARAM_SAMPLE_BITS, master_runtime->sample_bits,
