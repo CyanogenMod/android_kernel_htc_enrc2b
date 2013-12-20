@@ -1437,6 +1437,7 @@ static int _regulator_enable(struct regulator_dev *rdev)
 			/* Allow the regulator to ramp; it would be useful
 			 * to extend this for bulk operations so that the
 			 * regulators can ramp together.  */
+			pr_info("[REGULATOR]+_regulator_enable ri=%s\n", rdev_get_name(rdev));
 			ret = rdev->desc->ops->enable(rdev);
 			if (ret < 0)
 				return ret;
@@ -1452,6 +1453,7 @@ static int _regulator_enable(struct regulator_dev *rdev)
 
 			_notifier_call_chain(
 				rdev, REGULATOR_EVENT_POST_ENABLE, NULL);
+			pr_info("[REGULATOR]-_regulator_enable ri=%s\n", rdev_get_name(rdev));
 			trace_regulator_enable_complete(rdev_get_name(rdev));
 
 		} else if (ret < 0) {
@@ -1516,13 +1518,13 @@ static int _regulator_disable(struct regulator_dev *rdev)
 		if (_regulator_can_change_status(rdev) &&
 		    rdev->desc->ops->disable) {
 			trace_regulator_disable(rdev_get_name(rdev));
-
+			pr_info("[REGULATOR]+_regulator_disable ri=%s\n", rdev_get_name(rdev));
 			ret = rdev->desc->ops->disable(rdev);
 			if (ret < 0) {
 				rdev_err(rdev, "failed to disable\n");
 				return ret;
 			}
-
+			pr_info("[REGULATOR]-_regulator_disable ri=%s\n", rdev_get_name(rdev));
 			trace_regulator_disable_complete(rdev_get_name(rdev));
 
 			_notifier_call_chain(rdev, REGULATOR_EVENT_DISABLE,
@@ -1845,8 +1847,6 @@ int regulator_set_voltage(struct regulator *regulator, int min_uV, int max_uV)
 {
 	struct regulator_dev *rdev = regulator->rdev;
 	int ret = 0;
-	int old_min_uV;
-	int old_max_uV;
 
 	mutex_lock(&rdev->mutex);
 
@@ -1868,9 +1868,6 @@ int regulator_set_voltage(struct regulator *regulator, int min_uV, int max_uV)
 	ret = regulator_check_voltage(rdev, &min_uV, &max_uV);
 	if (ret < 0)
 		goto out;
-	
-	old_min_uV = regulator->min_uV;
-	old_max_uV = regulator->max_uV;
 	regulator->min_uV = min_uV;
 	regulator->max_uV = max_uV;
 
@@ -1879,10 +1876,7 @@ int regulator_set_voltage(struct regulator *regulator, int min_uV, int max_uV)
 		goto out;
 
 	ret = _regulator_do_set_voltage(rdev, min_uV, max_uV);
-	if (ret < 0) {
-		regulator->min_uV = old_min_uV;
-		regulator->max_uV = old_max_uV;
-	}
+
 out:
 	mutex_unlock(&rdev->mutex);
 	return ret;

@@ -347,13 +347,11 @@ CHECK		= sparse
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
+CFLAGS_MODULE   =
+AFLAGS_MODULE   =
 LDFLAGS_MODULE  =
-CFLAGS_KERNEL  = -mcpu=cortex-a9 -mtune=cortex-a9 -ffast-math -fsingle-precision-constant -march=armv7-a -mfpu=neon -mvectorize-with-neon-quad -fsched-spec-load
+CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
-MODFLAGS  = -DMODULE $(CFLAGS_KERNEL)
-CFLAGS_MODULE   = $(MODFLAGS)
-AFLAGS_MODULE   = $(MODFLAGS)
-
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 
 
@@ -370,8 +368,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
-		   -fno-delete-null-pointer-checks \
-		   -Wno-maybe-uninitialized
+		   -fno-delete-null-pointer-checks
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__
@@ -562,9 +559,9 @@ endif # $(dot-config)
 all: vmlinux
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
-KBUILD_CFLAGS	+= -Os -Wno-address
+KBUILD_CFLAGS	+= -Os
 else
-KBUILD_CFLAGS	+= -O3 -Wno-address
+KBUILD_CFLAGS	+= -O2
 endif
 
 include $(srctree)/arch/$(SRCARCH)/Makefile
@@ -777,6 +774,9 @@ quiet_cmd_vmlinux_version = GEN     .version
 	if [ ! -r .version ]; then			\
 	  rm -f .version;				\
 	  echo 1 >.version;				\
+	else						\
+	  mv .version .old_version;			\
+	  expr 0$$(cat .old_version) + 1 >.version;	\
 	fi;						\
 	$(MAKE) $(build)=init
 

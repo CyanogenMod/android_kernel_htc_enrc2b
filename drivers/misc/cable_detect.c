@@ -311,7 +311,7 @@ static int cable_detect_get_type(struct cable_detect_info *pInfo)
 		if (adc >= 0 && adc < 50)
 			type = sec_detect(pInfo);
 		else {
-			if (adc >= 150 && adc < 170)
+			if (adc >= 140 && adc < 173)
 				type = DOCK_STATE_CAR;
 			else
 				type = DOCK_STATE_UNDEFINED;
@@ -1103,14 +1103,14 @@ void cable_detection_queue_recovery_host_work(int time)
 }
 EXPORT_SYMBOL(cable_detection_queue_recovery_host_work);
 
-void clear_usb_reset_wdt(void)
+void clear_usb_reset_wdt()
 {
 	struct cable_detect_info *pInfo = &the_cable_info;
 	if (pInfo->reset_en_clr_gpio > 0) {
 		if (gpio_direction_output(pInfo->reset_en_clr_gpio, 0) < 0)
-			pr_info("[CABLE] %s: GPIO RESET_EN_CLR(%d) dir NG\n", __func__,pInfo->reset_en_clr_gpio);
+			pr_info("[CABLE] %s: GPIO RESET_EN_CLR(%d) dir NG %d\n", __func__,pInfo->reset_en_clr_gpio);
 		else
-			pr_info("[CABLE] %s: GPIO RESET_EN_CLR(%d) O(L) ok\n", __func__,pInfo->reset_en_clr_gpio);
+			pr_info("[CABLE] %s: GPIO RESET_EN_CLR(%d) O(L) ok %d\n", __func__,pInfo->reset_en_clr_gpio);
 	}
 }
 void enable_usb_reset_wdt(struct work_struct *w)
@@ -1143,6 +1143,36 @@ struct platform_driver cable_detect_driver = {
 		.name = "cable_detect",
 		.owner = THIS_MODULE,
 	},
+};
+
+static void usb_status_notifier_func(int cable_type) /* TBD: Not Used on AP33 */
+{
+	struct cable_detect_info*pInfo = &the_cable_info;
+
+	CABLE_INFO("%s: cable_type = %d\n", __func__, cable_type);
+#if 0  /* Wireless Charger */
+	if (cable_type > CONNECT_TYPE_NONE) {
+		if (pInfo->is_wireless_charger) {
+			if (pInfo->is_wireless_charger())
+				cable_type = CONNECT_TYPE_WIRELESS;
+		}
+	}
+#endif
+#ifdef CONFIG_TEGRA_HDMI_MHL
+#ifdef MHL_INTERNAL_POWER
+	if (pInfo->mhl_internal_3v3 && pInfo->accessory_type == DOCK_STATE_MHL) {
+		CABLE_INFO("%s: MHL detected. Do nothing\n", __func__);
+		return;
+	}
+#endif
+#endif
+	pInfo->connect_type = cable_type;
+	send_cable_connect_notify(cable_type);
+}
+
+static struct t_usb_status_notifier usb_status_notifier = {
+	.name = "cable_detect",
+	.func = usb_status_notifier_func,
 };
 
 static int __init cable_detect_init(void)

@@ -443,9 +443,11 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	res = access_process_vm(task, mm->arg_start, path, len, 0);
 	mmput(mm);
 
-	/* We only trust the superuser with rebooting the system. */
-	if (!capable(CAP_SYS_BOOT))
-		return -EPERM;
+	if (!(!strcmp("/system/bin/reboot", path) && cmd == LINUX_REBOOT_CMD_RESTART2)) {
+		/* We only trust the superuser with rebooting the system. */
+		if (!capable(CAP_SYS_BOOT))
+			return -EPERM;
+	}
 
 	/* For safety, we require "magic" arguments. */
 	if (magic1 != LINUX_REBOOT_MAGIC1 ||
@@ -652,7 +654,6 @@ static int set_user(struct cred *new)
 
 	free_uid(new->user);
 	new->user = new_user;
-	sched_autogroup_create_attach(current);
 	return 0;
 }
 
@@ -1162,7 +1163,7 @@ out:
 	write_unlock_irq(&tasklist_lock);
 	if (err > 0) {
 		proc_sid_connector(group_leader);
-		
+		sched_autogroup_create_attach(group_leader);
 	}
 	return err;
 }
@@ -1182,15 +1183,16 @@ DECLARE_RWSEM(uts_sem);
  * Work around broken programs that cannot handle "Linux 3.0".
  * Instead we map 3.x to 2.6.40+x, so e.g. 3.0 would be 2.6.40
  */
-static int override_release(char __user *release, int len)
+static int override_release(char __user *release, size_t len)
 {
 	int ret = 0;
-	char buf[65];
 
 	if (current->personality & UNAME26) {
-		char *rest = UTS_RELEASE;
+		const char *rest = UTS_RELEASE;
+		char buf[65] = { 0 };
 		int ndots = 0;
 		unsigned v;
+		size_t copy;
 
 		while (*rest) {
 			if (*rest == '.' && ++ndots >= 3)
@@ -1200,8 +1202,9 @@ static int override_release(char __user *release, int len)
 			rest++;
 		}
 		v = ((LINUX_VERSION_CODE >> 8) & 0xff) + 40;
-		snprintf(buf, len, "2.6.%u%s", v, rest);
-		ret = copy_to_user(release, buf, len);
+		copy = min(sizeof(buf), max_t(size_t, 1, len));
+		copy = scnprintf(buf, copy, "2.6.%u%s", v, rest);
+		ret = copy_to_user(release, buf, copy + 1);
 	}
 	return ret;
 }

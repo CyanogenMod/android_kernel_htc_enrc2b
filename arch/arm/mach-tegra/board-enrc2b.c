@@ -35,6 +35,7 @@
 #include <linux/spi/spi.h>
 #include <linux/tegra_uart.h>
 #include <linux/fsl_devices.h>
+#include <linux/i2c/atmel_mxt_ts.h>
 #include <linux/memblock.h>
 #include <linux/gpio_keys.h>
 #include <linux/synaptics_i2c_rmi.h>
@@ -81,6 +82,7 @@
 #include "fuse.h"
 #include "pm.h"
 #include "touch.h"
+#include "htc_perf.h"
 #include "wakeups-t3.h"
 
 #define PMC_WAKE_STATUS         0x14
@@ -96,10 +98,6 @@ extern bool is_resume_from_deep_suspend(void);
 
 #include <media/rawchip/rawchip.h>
 #include <media/rawchip/Yushan_HTC_Functions.h>
-
-#ifdef CONFIG_SERIAL_TEGRA_BRCM_LPM
-#include <linux/bcm_bt_lpm.h>
-#endif
 
 static struct balanced_throttle throttle_list[] = {
 	{
@@ -226,8 +224,8 @@ static struct led_i2c_config lp5521_led_config[] = {
 	},
 	{
 		.name = "button-backlight",
-		.led_cur = 2,
-		.led_lux = 25,
+		.led_cur = 95,
+		.led_lux = 55,
 	},
 };
 static struct led_i2c_platform_data led_data = {
@@ -244,6 +242,8 @@ static struct i2c_board_info i2c_led_devices[] = {
 };
 static void leds_lp5521_init(void)
 {
+	if( htc_get_pcbid_info() > PROJECT_PHASE_XC || (board_get_sku_tag() == 0x34600) )
+		lp5521_led_config[2].led_lux = 25;
 	i2c_register_board_info(1, i2c_led_devices,
 		ARRAY_SIZE(i2c_led_devices));
 }
@@ -437,12 +437,11 @@ static int eva_rawchip_vreg_on(void)
 {
 	int ret;
 
+	pr_info("[CAM] rawchip power on ++\n");
+
 	/* enable main clock */
 	struct clk *csus_clk = NULL;
 	struct clk *sensor_clk = NULL;
-	
-	pr_info("[CAM] rawchip power on ++\n");
-	
 	csus_clk = clk_get(NULL, "csus");
 	if (IS_ERR_OR_NULL(csus_clk)) {
 		pr_err("%s: couldn't get csus clock\n", __func__);
@@ -493,12 +492,11 @@ static int eva_rawchip_vreg_on(void)
 
 static int eva_rawchip_vreg_off(void)
 {
+	pr_info("[CAM] rawchip power off ++\n");
+
 	/* disable main clock */
 	struct clk *csus_clk = NULL;
 	struct clk *sensor_clk = NULL;
-	
-	pr_info("[CAM] rawchip power off ++\n");
-	
 	csus_clk = clk_get(NULL, "csus");
 	if (IS_ERR_OR_NULL(csus_clk)) {
 		pr_err("%s: couldn't get csus clock\n", __func__);
@@ -560,7 +558,6 @@ static struct platform_device tegra_rawchip_device = {
 
 /* HTC_HEADSET_GPIO Driver */
 static struct htc_headset_gpio_platform_data htc_headset_gpio_data = {
-	.eng_cfg		= HS_ENRC2_U_XB,
 	.hpin_gpio		= TEGRA_GPIO_PW2,
 	.key_gpio		= TEGRA_GPIO_PBB6,
 	.key_enable_gpio	= 0,
@@ -576,8 +573,7 @@ static struct platform_device htc_headset_gpio = {
 };
 
 /* HTC_HEADSET_MICROP Driver */
-/*static struct htc_headset_microp_platform_data htc_headset_microp_data = {
-	.eng_cfg			= HS_ENRC2_U_XB,
+static struct htc_headset_microp_platform_data htc_headset_microp_data = {
 	.remote_int		= 1 << 13,
 //	.remote_irq		= TEGRA_uP_TO_INT(13),
 	.remote_enable_pin	= 0,
@@ -591,14 +587,14 @@ static struct platform_device htc_headset_microp = {
 	.dev	= {
 		.platform_data	= &htc_headset_microp_data,
 	},
-};*/
+};
 
 /* HTC_HEADSET_PMIC Driver */
 static struct htc_headset_pmic_platform_data htc_headset_pmic_data_xe = {
-	.eng_cfg		= HS_ENRC2_U_XB,
-	.driver_flag	= DRIVER_HS_PMIC_RPC_KEY,
-	.adc_mic_bias	= {HS_DEF_MIC_ADC_12_BIT_MIN,
-				   HS_DEF_MIC_ADC_12_BIT_MAX},
+	.driver_flag	= DRIVER_HS_PMIC_ADC,
+	.adc_mic_bias	= {HS_DEF_MIC_ADC_16_BIT_MIN,
+				   HS_DEF_MIC_ADC_16_BIT_MAX},
+	.adc_channel	= 4,
 	.adc_remote	= {0, 164, 165, 379, 380, 830},
 };
 
@@ -707,11 +703,9 @@ static void uart_lv_shift_en(int enable)
 }
 
 static struct htc_headset_mgr_platform_data htc_headset_mgr_data_xe = {
-	.eng_cfg				= HS_ENRC2_U_XB,
 	.driver_flag		= DRIVER_HS_MGR_FLOAT_DET,
 	.headset_devices_num	= ARRAY_SIZE(headset_devices_xe),
 	.headset_devices	= headset_devices_xe,
-	.enable_1wire			= 0,
 	.headset_config_num	= ARRAY_SIZE(htc_headset_mgr_config_xe),
 	.headset_config		= htc_headset_mgr_config_xe,
 	.headset_init		= headset_init,
@@ -749,34 +743,12 @@ static void enrc2b_i2c_init(void)
 #endif
 }
 
-#ifdef CONFIG_SERIAL_TEGRA_BRCM
-#ifdef CONFIG_SERIAL_TEGRA_BRCM_LPM
-static struct bcm_bt_lpm_platform_data bcm_bt_lpm_pdata = {
-	.gpio_wake = ENRC2B_GPIO_BT_WAKE,
-	.gpio_host_wake = ENRC2B_GPIO_BT_HOST_WAKE,
-	.request_lpm_off_locked = tegra_lpm_off_locked,
-	.request_lpm_on_locked = tegra_lpm_on_locked,
-};
-
-struct platform_device bcm_bt_lpm_device = {
-	.name = "bcm_bt_lpm",
-	.id = 0,
-	.dev = {
-		.platform_data = &bcm_bt_lpm_pdata,
-	},
-};
-#endif
-#endif
-
 static struct platform_device *enrc2b_uart_devices[] __initdata = {
 	&tegra_uarta_device,
 	&tegra_uartb_device,
 	&tegra_uartc_device,
 	&tegra_uartd_device,
 	&tegra_uarte_device,
-#ifdef CONFIG_SERIAL_TEGRA_BRCM_LPM
-    &bcm_bt_lpm_device,
-#endif
 };
 
 static struct uart_clk_parent uart_parent_clk[] = {
@@ -787,9 +759,7 @@ static struct uart_clk_parent uart_parent_clk[] = {
 #endif
 };
 static struct tegra_uart_platform_data enrc2b_uart_pdata;
-/* GPS uses UARTE
 static struct tegra_uart_platform_data enrc2b_loopback_uart_pdata;
-*/
 
 #ifdef CONFIG_SERIAL_TEGRA_BRCM
 static struct tegra_uart_platform_data enrc2b_brcm_uart_pdata;
@@ -861,9 +831,6 @@ static void __init enrc2b_uart_init(void)
 #ifdef CONFIG_SERIAL_TEGRA_BRCM
 	enrc2b_brcm_uart_pdata = enrc2b_uart_pdata;
 	enrc2b_brcm_uart_pdata.bt_wakeup_pin_supported = 1;
-#ifdef CONFIG_SERIAL_TEGRA_BRCM_LPM
-	enrc2b_brcm_uart_pdata.exit_lpm_cb = bcm_bt_lpm_exit_lpm;
-#endif
 	enrc2b_brcm_uart_pdata.bt_wakeup_pin = ENRC2B_GPIO_BT_WAKE;
 	enrc2b_brcm_uart_pdata.host_wakeup_pin = ENRC2B_GPIO_BT_HOST_WAKE;
 	tegra_uartc_device.dev.platform_data = &enrc2b_brcm_uart_pdata;
@@ -1020,6 +987,31 @@ static const u8 config[] = {
         0x00
 };
 
+static struct mxt_platform_data atmel_mxt_info = {
+        .x_line         = 19,
+        .y_line         = 11,
+        .x_size         = 960,
+        .y_size         = 540,
+        .blen           = 0x10,
+        .threshold      = 0x32,
+        .voltage        = 3300000,              /* 3.3V */
+        .orient         = 3,
+        .config         = config,
+        .config_length  = 168,
+        .config_crc     = MXT_CONFIG_CRC,
+        .irqflags       = IRQF_TRIGGER_FALLING,
+/*      .read_chg       = &read_chg, */
+        .read_chg       = NULL,
+};
+
+static struct i2c_board_info __initdata atmel_i2c_info[] = {
+	{
+		I2C_BOARD_INFO("atmel_mxt_ts", MXT224_I2C_ADDR1),
+		.irq = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PH6),
+		.platform_data = &atmel_mxt_info,
+	}
+};
+
 //virtual key for XC board and later (3 virtual keys)
 static ssize_t Aproj_virtual_keys_show_XC(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
@@ -1092,7 +1084,7 @@ static struct synaptics_i2c_rmi_platform_data edge_ts_3k_data_XB[] = {
 		.abs_y_max = 1770,
 		.display_width = 720,
 		.display_height = 1280,
-		.notifyFinger = NULL, /* restore browser cap, */
+		.notifyFinger = restoreCap, /* restore browser cap, */
 		.gpio_irq = TOUCH_GPIO_IRQ,
 		.power = powerfun,
 		.report_type = SYN_AND_REPORT_TYPE_B,
@@ -1153,7 +1145,7 @@ static struct synaptics_i2c_rmi_platform_data edge_ts_3k_data_XB[] = {
 		.abs_y_max = 1770,
 		.display_width = 720,
 		.display_height = 1280,
-		.notifyFinger = NULL, /* restore browser cap, */
+		.notifyFinger = restoreCap, /* restore browser cap, */
 		.gpio_irq = TOUCH_GPIO_IRQ,
 		.power = powerfun,
 		.default_config = 2,
@@ -1210,7 +1202,7 @@ static struct synaptics_i2c_rmi_platform_data edge_ts_3k_data_XB[] = {
 		.abs_y_max = 1770,
 		.display_width = 720,
 		.display_height = 1280,
-		.notifyFinger = NULL, /* restore browser cap, */
+		.notifyFinger = restoreCap, /* restore browser cap, */
 		.gpio_irq = TOUCH_GPIO_IRQ,
 		.power = powerfun,
 		.default_config = 2,
@@ -1265,7 +1257,7 @@ static struct synaptics_i2c_rmi_platform_data edge_ts_3k_data_XB[] = {
 		.abs_x_max = 1100,
 		.abs_y_min = 0,
 		.abs_y_max = 1770,
-		.notifyFinger = NULL, /* restore browser cap, */
+		.notifyFinger = restoreCap, /* restore browser cap, */
 		.gpio_irq = TOUCH_GPIO_IRQ,
 		.power = powerfun,
 		.default_config = 2,
@@ -1316,7 +1308,7 @@ static struct synaptics_i2c_rmi_platform_data edge_ts_3k_data_XB[] = {
 		.abs_x_max = 1100,
 		.abs_y_min = 0,
 		.abs_y_max = 1770,
-		.notifyFinger = NULL, /* restore browser cap, */
+		.notifyFinger = restoreCap, /* restore browser cap, */
 		.gpio_irq = TOUCH_GPIO_IRQ,
 		.power = powerfun,
 		.default_config = 2,
@@ -1517,31 +1509,34 @@ static int __init enrc2b_touch_init(void)
 	return retval;
 }
 
-static void enrc2b_usb_hsic_postsupend(void)
+static int enrc2b_usb_hsic_postsupend(void)
 {
 	pr_debug("%s\n", __func__);
 #ifdef CONFIG_TEGRA_BB_XMM_POWER
 	baseband_xmm_set_power_status(BBXMM_PS_L2);
 #endif
+	return 0;
 }
 
-static void enrc2b_usb_hsic_preresume(void)
+static int enrc2b_usb_hsic_preresume(void)
 {
 	pr_debug("%s\n", __func__);
 #ifdef CONFIG_TEGRA_BB_XMM_POWER
 	baseband_xmm_set_power_status(BBXMM_PS_L2TOL0);
 #endif
+	return 0;
 }
 
-static void enrc2b_usb_hsic_phy_ready(void)
+static int enrc2b_usb_hsic_phy_ready(void)
 {
 	pr_debug("%s\n", __func__);
 #ifdef CONFIG_TEGRA_BB_XMM_POWER
 	baseband_xmm_set_power_status(BBXMM_PS_L0);
 #endif
+	return 0;
 }
 
-static void enrc2b_usb_hsic_phy_off(void)
+static int enrc2b_usb_hsic_phy_off(void)
 {
 	pr_debug("%s\n", __func__);
 #ifdef CONFIG_TEGRA_BB_XMM_POWER
@@ -1551,6 +1546,7 @@ static void enrc2b_usb_hsic_phy_off(void)
 	baseband_xmm_set_power_status(BBXMM_PS_L3);
 #endif
 #endif
+	return 0;
 }
 
 static struct tegra_usb_phy_platform_ops hsic_xmm_plat_ops = {
@@ -1681,7 +1677,11 @@ static void tegra_usb_hsic_host_unregister(struct platform_device *pdev)
 
 static struct android_usb_platform_data android_usb_pdata = {
 	.vendor_id	= 0x0BB4,
+#ifdef CONFIG_SENSE_4_PLUS
 	.product_id	= 0x0dfd,
+#else
+	.product_id	= 0x0cfa,
+#endif
 	.version	= 0x0100,
 	.product_name		= "Android Phone",
 	.manufacturer_name	= "HTC",
@@ -1750,7 +1750,7 @@ static void config_tegra_usb_id_gpios(bool output)
 }
 
 /* Config RESET_EN_CLR and CHG_WDT_EN gpio for reset chip*/
-static void config_tegra_usb_reset_wdt_gpios(void)
+static void config_tegra_usb_reset_wdt_gpios()
 {
 	int ret = 0;
 	pr_info("[CABLE] %s:\n", __func__);
@@ -1988,8 +1988,8 @@ static struct platform_device tegra_baseband_m7400_device = {
 
 static void enrc2b_modem_init(void)
 {
-        int ret;
-        
+        struct board_info board_info;
+
         pr_info("%s: enable baseband gpio(s)\n", __func__);
         /* enable baseband gpio(s) */
         tegra_gpio_enable(BB_VDD_EN);
@@ -2013,7 +2013,7 @@ static void enrc2b_modem_init(void)
 
         // TEGRA_GPIO_PI5
         printk(KERN_INFO"%s: gpio config for sim_det#.", __func__);
-
+        int ret;
         ret = gpio_request(TEGRA_GPIO_PI5, "sim_det#");
         if (ret < 0)
                 pr_err("[FLT] %s: gpio_request failed for gpio %s\n",
@@ -2046,6 +2046,45 @@ static void enrc2b_modem_init(void)
         tegra_gpio_enable(TEGRA_GPIO_PN2);
         gpio_export(TEGRA_GPIO_PN2, true);
         /*enable core dumo dectect--*/
+}
+
+static void gpio_o_l(int gpio, char* name)
+{
+        int ret = gpio_request(gpio, name);
+        if (ret < 0)
+        {
+                pr_err("[KW] %s: gpio_request failed for gpio %s\n",
+                        __func__, name);
+                //return;
+        }
+        ret = gpio_direction_output(gpio, 0);
+        if (ret < 0) {
+                pr_err("[KW] %s: gpio_direction_output failed %d\n", __func__, ret);
+                gpio_free(gpio);
+                return;
+        }
+        tegra_gpio_enable(gpio);
+        gpio_export(gpio, true);
+}
+
+static void modem_not_init(void)
+{
+        pr_info("%s: disable gpio\n", __func__);
+
+        gpio_o_l(TEGRA_GPIO_PM4, "TEGRA_GPIO_PM4");
+        gpio_o_l(TEGRA_GPIO_PC1, "TEGRA_GPIO_PC1");
+        gpio_o_l(TEGRA_GPIO_PN0, "TEGRA_GPIO_PN0");
+        gpio_o_l(TEGRA_GPIO_PN3, "TEGRA_GPIO_PN3");
+        gpio_o_l(TEGRA_GPIO_PC6, "TEGRA_GPIO_PC6");
+        gpio_o_l(TEGRA_GPIO_PJ0, "TEGRA_GPIO_PJ0");
+        gpio_o_l(TEGRA_GPIO_PV0, "TEGRA_GPIO_PV0");
+        gpio_o_l(TEGRA_GPIO_PN1, "TEGRA_GPIO_PN1");
+        gpio_o_l(TEGRA_GPIO_PN2, "TEGRA_GPIO_PN2");
+        gpio_o_l(TEGRA_GPIO_PJ7, "TEGRA_GPIO_PJ7");
+        gpio_o_l(TEGRA_GPIO_PK7, "TEGRA_GPIO_PK7");
+        gpio_o_l(TEGRA_GPIO_PB0, "TEGRA_GPIO_PB0");
+        gpio_o_l(TEGRA_GPIO_PB1, "TEGRA_GPIO_PB1");
+
 }
 
 #define DEFAULT_PINMUX(_pingroup, _mux, _pupd, _tri, _io)   \
@@ -2139,7 +2178,7 @@ static struct platform_device enr_reset_keys_device = {
 #define BOOT_DEBUG_LOG_LEAVE(fn) \
 	printk(KERN_NOTICE "[BOOT_LOG] Leaving %s\n", fn);
 
-static int enrkey_wakeup(void) {
+static int enrkey_wakeup() {
 	if ( is_resume_from_deep_suspend() ) {
 		unsigned long status =
 			readl(IO_ADDRESS(TEGRA_PMC_BASE) + PMC_WAKE_STATUS);
@@ -2148,7 +2187,7 @@ static int enrkey_wakeup(void) {
 		return KEY_RESERVED;
 }
 
-static int mistouch_gpio_normal(void) {
+static int mistouch_gpio_normal() {
 	int ret;
 	ret = gpio_direction_input(TEGRA_GPIO_PD2);
 	if (ret < 0) {
@@ -2160,7 +2199,7 @@ static int mistouch_gpio_normal(void) {
 	return 0;
 }
 
-static int mistouch_gpio_active(void) {
+static int mistouch_gpio_active() {
 	int ret;
 	ret = gpio_direction_output(TEGRA_GPIO_PD2, 0);
 	if (ret < 0) {
@@ -2180,8 +2219,8 @@ static int mistouch_gpio_active(void) {
 
 static struct gpio_keys_button ENRC2_PROJECT_keys[] = {
 	[0] = GPIO_KEY(KEY_POWER, PU6, 1),
-	[1] = GPIO_KEY(KEY_VOLUMEUP, PI6, 1),
-	[2] = GPIO_KEY(KEY_VOLUMEDOWN, PW3, 1),
+	[1] = GPIO_KEY(KEY_VOLUMEUP, PI6, 0),
+	[2] = GPIO_KEY(KEY_VOLUMEDOWN, PW3, 0),
  };
 
 static struct gpio_keys_platform_data ENRC2_PROJECT_keys_platform_data = {
@@ -2226,10 +2265,11 @@ static int __init ENRC2_PROJECT_keys_init(void)
 
 static int mhl_sii_power(int on)
 {
-	int rc = 0;
-
 	pr_info("[DISP]%s(%d) IN\n", __func__, __LINE__);
-	
+
+	int rc = 0;
+	int err = 0;
+
 	switch (on) {
 		case 0:
 			//mhl_sii9234_1v2_power(false);
@@ -2292,8 +2332,7 @@ static struct i2c_board_info i2c_mhl_sii_info[] =
 static void __init enrc2b_init(void)
 {
 	struct kobject *properties_kobj;
-	struct proc_dir_entry* proc;
-    int rc = 0;
+
 	tegra_thermal_init(&thermal_data,
 				throttle_list,
 				ARRAY_SIZE(throttle_list));
@@ -2309,8 +2348,10 @@ static void __init enrc2b_init(void)
 		headset_devices_xe[2] = NULL; /*Do not register 1wire driver if debug enable*/
 		htc_headset_mgr_data_xe.headset_devices_num--;
 	}
-	if (board_mfg_mode() != BOARD_MFG_MODE_OFFMODE_CHARGING)
-		platform_device_register(&htc_headset_mgr_xe);
+	platform_device_register(&htc_headset_mgr_xe);
+#if defined(CONFIG_HTC_FIQ_DUMPER)
+	fiq_dumper_init();
+#endif
 #if defined(CONFIG_MEMORY_FOOTPRINT_DEBUGGING)
 	htc_memory_footprint_init();
 #endif
@@ -2330,11 +2371,8 @@ static void __init enrc2b_init(void)
 		printk(KERN_WARNING "[KEY]%s: register reset key fail\n", __func__);
         properties_kobj = kobject_create_and_add("board_properties", NULL);
 	if (properties_kobj) {
-		rc = sysfs_create_group(properties_kobj, &Aproj_properties_attr_group_XC);
+		sysfs_create_group(properties_kobj, &Aproj_properties_attr_group_XC);
 	}
-    if (!properties_kobj || rc)
-        pr_err("failed to create board_properties\n");
-
 	enrc2b_audio_init();
 	enrc2b_gps_init();
 	enrc2b_baseband_init();
@@ -2353,27 +2391,34 @@ static void __init enrc2b_init(void)
 #endif
 	config_tegra_usb_reset_wdt_gpios();
 	//enrc2b_nfc_init();
+	struct proc_dir_entry* proc;
 	proc = create_proc_read_entry("dying_processes", 0, NULL, dying_processors_read_proc, NULL);
 	if (!proc)
 		printk(KERN_ERR"Create /proc/dying_processes FAILED!\n");
 
-	if (!!(get_kernel_flag() & KERNEL_FLAG_PM_MONITOR) && board_mfg_mode() != BOARD_MFG_MODE_OFFMODE_CHARGING) {
-		printk(KERN_INFO"Ryan: enable moniter\n");
-		htc_monitor_init();
-		htc_pm_monitor_init();
-	}
+	if (board_mfg_mode() != BOARD_MFG_MODE_OFFMODE_CHARGING)
+#if ! defined(CONFIG_HTC_PERFORMANCE_MONITOR_ALWAYS_ON)
+		if (get_kernel_flag() & KERNEL_FLAG_PM_MONITOR)
+#endif
+		{
+			htc_monitor_init();
+			htc_pm_monitor_init();
+		}
 }
 
 static void __init enrc2b_reserve(void)
 {
 #if defined(CONFIG_NVMAP_CONVERT_CARVEOUT_TO_IOVMM)
-	tegra_reserve(0, SZ_4M, SZ_8M);
+	tegra_reserve(0, SZ_4M, 0);
 #else
 	tegra_reserve(SZ_128M, SZ_4M, SZ_8M);
 #endif
 	tegra_ram_console_debug_reserve(SZ_1M);
 #if defined(CONFIG_MEMORY_FOOTPRINT_DEBUGGING)
 	htc_memory_footprint_space_reserve(SZ_4K);
+#endif
+#if defined(CONFIG_HTC_FIQ_DUMPER)
+	fiq_dumper_space_reserve(SZ_4K);
 #endif
 }
 

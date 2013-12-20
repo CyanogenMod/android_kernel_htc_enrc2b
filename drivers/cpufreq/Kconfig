@@ -79,6 +79,7 @@ config CPU_FREQ_DEFAULT_GOV_USERSPACE
 config CPU_FREQ_DEFAULT_GOV_ONDEMAND
 	bool "ondemand"
 	select CPU_FREQ_GOV_ONDEMAND
+	select CPU_FREQ_GOV_PERFORMANCE
 	help
 	  Use the CPUFreq governor 'ondemand' as default. This allows
 	  you to get a full dynamic frequency capable system by simply
@@ -86,33 +87,11 @@ config CPU_FREQ_DEFAULT_GOV_ONDEMAND
 	  Be aware that not all cpufreq drivers support the ondemand
 	  governor. If unsure have a look at the help section of the
 	  driver. Fallback governor will be the performance governor.
-
-config CPU_FREQ_DEFAULT_GOV_ONDEMAND1
-	bool "ondemand"
-	select CPU_FREQ_GOV_ONDEMAND1
-	help
-	  Use the CPUFreq governor 'ondemand' as default. This allows
-	  you to get a full dynamic frequency capable system by simply
-	  loading your cpufreq low-level hardware driver.
-	  Be aware that not all cpufreq drivers support the ondemand
-	  governor. If unsure have a look at the help section of the
-	  driver. Fallback governor will be the performance governor.
-
-config CPU_FREQ_DEFAULT_GOV_SMARTMAX
-	bool "smartmax"
-	select CPU_FREQ_GOV_SMARTMAX
-	help
-	  Use the CPUFreq governor 'smartmax' as default
-
-config CPU_FREQ_DEFAULT_GOV_SMARTMAX_EPS
-	bool "smartmax EPS"
-	select CPU_FREQ_GOV_SMARTMAX_EPS
-	help
-	  Use the CPUFreq governor 'smartmax EPS' extreme power saving as default
 
 config CPU_FREQ_DEFAULT_GOV_CONSERVATIVE
 	bool "conservative"
 	select CPU_FREQ_GOV_CONSERVATIVE
+	select CPU_FREQ_GOV_PERFORMANCE
 	help
 	  Use the CPUFreq governor 'conservative' as default. This allows
 	  you to get a full dynamic frequency capable system by simply
@@ -189,60 +168,10 @@ config CPU_FREQ_GOV_ONDEMAND
 
 config CPU_FREQ_GOV_ONDEMAND_2_PHASE
 	bool "'2-phase' power-efficiency ondemand algorithm"
-	depends on CPU_FREQ_GOV_ONDEMAND || CPU_FREQ_GOV_ONDEMAND1
+	depends on CPU_FREQ_GOV_ONDEMAND
 	help
 	  '2-phase' - Adding a new algorithm to reduce power consumption
 
-config CPU_FREQ_GOV_ONDEMAND1
-	tristate "'ondemand1' cpufreq policy governor"
-	select CPU_FREQ_TABLE
-	help
-	  'ondemand1' - This driver adds a dynamic cpufreq policy governor.
-	  The governor does a periodic polling and 
-	  changes frequency based on the CPU utilization.
-	  The support for this governor depends on CPU capability to
-	  do fast frequency switching (i.e, very low latency frequency
-	  transitions). 
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called cpufreq_ondemand1.
-
-	  For details, take a look at linux/Documentation/cpu-freq.
-
-	  If in doubt, say N.
-
-config CPU_FREQ_GOV_SMARTMAX
-	tristate "'smartmax' cpufreq policy governor"
-	select CPU_FREQ_TABLE
-	help
-	  'smartmax' combined ondemand and smartass2
-
-config CPU_FREQ_GOV_SMARTMAX_TEGRA
-	bool "'smartmax' for tegra"
-	depends on CPU_FREQ_GOV_SMARTMAX || CPU_FREQ_GOV_SMARTMAX_EPS
-
-config CPU_FREQ_GOV_SMARTMAX_30
-	bool "'smartmax' for 3.0 and 3.1 kernels"
-	depends on CPU_FREQ_GOV_SMARTMAX || CPU_FREQ_GOV_SMARTMAX_EPS
-
-config CPU_FREQ_GOV_SMARTMAX_ENRC2B
-	bool "'smartmax' defaults for enrc2b"
-	depends on CPU_FREQ_GOV_SMARTMAX || CPU_FREQ_GOV_SMARTMAX_EPS
-
-config CPU_FREQ_GOV_SMARTMAX_PRIMOU
-	bool "'smartmax' defaults for primou"
-	depends on CPU_FREQ_GOV_SMARTMAX || CPU_FREQ_GOV_SMARTMAX_EPS
-
-config CPU_FREQ_GOV_SMARTMAX_M7
-	bool "'smartmax' defaults for m7"
-	depends on CPU_FREQ_GOV_SMARTMAX || CPU_FREQ_GOV_SMARTMAX_EPS
-
-config CPU_FREQ_GOV_SMARTMAX_EPS
-	tristate "'smartmax EPS' cpufreq policy governor"
-	select CPU_FREQ_TABLE
-	help
-	  'smartmax EPS' is the extreme powersaving version of smartmax
-	  
 config CPU_FREQ_GOV_INTERACTIVE
 	tristate "'interactive' cpufreq policy governor"
 	help

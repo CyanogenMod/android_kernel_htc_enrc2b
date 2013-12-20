@@ -1073,7 +1073,7 @@ static void dapm_seq_run(struct snd_soc_dapm_context *dapm,
 	}
 
 	if (cur_dapm == NULL){
-		pr_debug("dapm_seq_run: cur_dapm == NULL\n");
+		printk(KERN_DEBUG "dapm_seq_run: cur_dapm == NULL\n");
 		return;
 	}
 

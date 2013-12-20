@@ -40,7 +40,8 @@
 #include "pm.h"
 #include "sleep.h"
 #include "tegra3_emc.h"
-#include "tegra_pmqos.h"
+
+#include <mach/mfootprint.h>
 
 #define RST_DEVICES_L			0x004
 #define RST_DEVICES_H			0x008
@@ -849,16 +850,14 @@ static int tegra3_cpu_clk_set_rate(struct clk *c, unsigned long rate)
      * to port to any other platforms,
      * pls. modify lt_rate to lt_rate[NR_CPUS] accordingly
      */
-#if defined(CONFIG_BEST_TRADE_HOTPLUG)
     static unsigned long lt_rate = 0;
-#endif
 
 	if (c->dvfs) {
 		if (!c->dvfs->dvfs_rail)
 			return -ENOSYS;
 		else if ((!c->dvfs->dvfs_rail->reg) &&
 			  (clk_get_rate_locked(c) < rate)) {
-			pr_debug("Increasing CPU rate while regulator is not"
+			WARN(1, "Increasing CPU rate while regulator is not"
 				" ready may overclock CPU\n");
 			return -ENOSYS;
 		}
@@ -1077,7 +1076,7 @@ static int tegra3_cpu_cmplx_clk_set_parent(struct clk *c, struct clk *p)
 			return 0;
 
 		if ((rate > p->max_rate) || (rate < p->min_rate)) {
-			pr_info("%s: No %s mode switch to %s at rate %lu\n",
+			pr_warn("%s: No %s mode switch to %s at rate %lu\n",
 				 __func__, c->name, p->name, rate);
 			return -ECANCELED;
 		}
@@ -1647,7 +1646,6 @@ static int tegra3_pll_clk_set_rate(struct clk *c, unsigned long rate)
 {
 	u32 val, p_div, old_base;
 	unsigned long input_rate;
-	unsigned long flags = 0;
 	const struct clk_pll_freq_table *sel;
 	struct clk_pll_freq_table cfg;
 
@@ -1760,17 +1758,21 @@ static int tegra3_pll_clk_set_rate(struct clk *c, unsigned long rate)
 	if (val == old_base)
 		return 0;
 
+	MF_DEBUG("00000000");
 	if (c->state == ON) {
 		tegra3_pll_clk_disable(c);
 		val &= ~(PLL_BASE_BYPASS | PLL_BASE_ENABLE);
 	}
+	MF_DEBUG("00000001");
 
+	unsigned long flags;
 	if (c->reg == 0xd0)
 		spin_lock_irqsave(&dc_spinlock_clk, flags);
 	clk_writel(val, c->reg + PLL_BASE);
 	if (c->reg == 0xd0)
 		spin_unlock_irqrestore(&dc_spinlock_clk, flags);
 
+	MF_DEBUG("00000002");
 	if (c->flags & PLL_HAS_CPCON) {
 		val = clk_readl(c->reg + PLL_MISC(c));
 		val &= ~PLL_MISC_CPCON_MASK;
@@ -1790,6 +1792,7 @@ static int tegra3_pll_clk_set_rate(struct clk *c, unsigned long rate)
 	if (c->state == ON)
 		tegra3_pll_clk_enable(c);
 
+	MF_DEBUG("00000003");
 	return 0;
 }
 
@@ -4861,7 +4864,7 @@ static struct cpufreq_frequency_table freq_table_1p7GHz[] = {
 	{ 2,  204000 },
 	{ 3,  340000 },
 	{ 4,  475000 },
-	{ 5,  620000 },
+	{ 5,  640000 },
 	{ 6,  760000 },
 	{ 7,  910000 },
 	{ 8, 1000000 },
@@ -4917,32 +4920,8 @@ static int clip_cpu_rate_limits(
 		return ret;
 	}
 	cpu_clk_lp->max_rate = freq_table[idx].frequency * 1000;
-
-	ret = cpufreq_frequency_table_target(policy, freq_table,
-		T3_GMODE_MIN_FREQ, CPUFREQ_RELATION_H, &idx);
-	if (ret || !idx) {
-		pr_err("%s: LP CPU min rate %lu %s of cpufreq table", __func__,
-		       cpu_clk_lp->min_rate, ret ? "outside" : "at the bottom");
-		return ret;
-	}
-	cpu_clk_g->min_rate = freq_table[idx].frequency * 1000;
-
-	ret = cpufreq_frequency_table_target(policy, freq_table,
-		T3_SUSPEND_FREQ, CPUFREQ_RELATION_H, &idx);
-	if (ret || !idx) {
-		pr_err("%s: suspend rate %d %s of cpufreq table", __func__,
-			T3_SUSPEND_FREQ * 1000, ret ? "outside" : "at the bottom");
-		return ret;
-	}
+	cpu_clk_g->min_rate = freq_table[idx-1].frequency * 1000;
 	data->suspend_index = idx;
-
-#if 0
-	pr_info("lp->max_rate = %lu\n", cpu_clk_lp->max_rate);
-	pr_info("g->min_rate = %lu\n", cpu_clk_g->min_rate);
-	pr_info("g->max_rate = %lu\n", cpu_clk_g->max_rate);
-	pr_info("suspend_rate = %d\n", freq_table[idx].frequency * 1000);
-#endif
-
 	return 0;
 }
 

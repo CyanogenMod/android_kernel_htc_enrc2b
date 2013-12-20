@@ -57,8 +57,6 @@
 #include <linux/pm_qos_params.h>
 #endif
 
-#include "../../../arch/arm/mach-tegra/tegra_pmqos.h"
-
 #define TX_EMPTY_STATUS (UART_LSR_TEMT | UART_LSR_THRE)
 
 #define BYTES_TO_ALIGN(x) ((unsigned long)(ALIGN((x), sizeof(u32))) - \
@@ -102,6 +100,10 @@ const int dma_req_sel[] = {
 #define TEGRA_UART_TX_TRIG_8B  0x10
 #define TEGRA_UART_TX_TRIG_4B  0x20
 #define TEGRA_UART_TX_TRIG_1B  0x30
+
+#ifdef TI_A2DP_TUNING_SUPPORTED
+#define TI_A2DP_CPU_FREQ_MIN 102000
+#endif
 
 #ifdef CONFIG_BT_CTS_WAKEUP
 struct tegra_uart_bt {
@@ -1569,7 +1571,7 @@ static int __init tegra_uart_probe(struct platform_device *pdev)
 	u->iotype = UPIO_MEM32;
 
 	u->irq = platform_get_irq(pdev, 0);
-	if (unlikely((int)(u->irq) < 0)) { 
+	if (unlikely(u->irq < 0)) {
 		ret = -ENXIO;
 		goto fail;
 	}

@@ -979,12 +979,14 @@ unsigned long tegra_hdmi_readl(struct tegra_dc_hdmi_data *hdmi,
 {
 	unsigned long ret;
 	ret = readl(hdmi->base + reg * 4);
+	trace_printk("readl %p=%#08lx\n", hdmi->base + reg * 4, ret);
 	return ret;
 }
 
 void tegra_hdmi_writel(struct tegra_dc_hdmi_data *hdmi,
 				     unsigned long val, unsigned long reg)
 {
+	trace_printk("writel %p=%#08lx\n", hdmi->base + reg * 4, val);
 	writel(val, hdmi->base + reg * 4);
 }
 
@@ -1535,7 +1537,7 @@ static void tegra_dc_hdmi_resume(struct tegra_dc *dc)
 #endif
 }
 
-void hdmi_hdcp_early_suspend(void)
+void hdmi_hdcp_early_suspend()
 {
 	struct tegra_dc *dc_hdmi = tegra_dc_get_dc(1);
 	struct tegra_dc_hdmi_data *hdmi = tegra_dc_get_outdata(dc_hdmi);
@@ -1544,12 +1546,12 @@ void hdmi_hdcp_early_suspend(void)
 
 void hdmi_set_hdmi_uevent (int value)
 {
-	//struct tegra_dc *dc_hdmi = tegra_dc_get_dc(1);
-	//struct tegra_dc_hdmi_data *hdmi = tegra_dc_get_outdata(dc_hdmi);
+	struct tegra_dc *dc_hdmi = tegra_dc_get_dc(1);
+	struct tegra_dc_hdmi_data *hdmi = tegra_dc_get_outdata(dc_hdmi);
 	//switch_set_state(&hdmi->hpd_switch, value);
 }
 
-void hdmi_hdcp_late_resume(void)
+void hdmi_hdcp_late_resume()
 {
 	struct tegra_dc *dc_hdmi = tegra_dc_get_dc(1);
 	struct tegra_dc_hdmi_data *hdmi = tegra_dc_get_outdata(dc_hdmi);

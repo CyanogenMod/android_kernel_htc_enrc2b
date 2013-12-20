@@ -1295,14 +1295,6 @@ int dhd_set_pktfilter(dhd_pub_t * dhd, int add, int id, int offset, char *mask, 
 	/* delete it */
 	bcm_mkiovar("pkt_filter_delete", (char *)&pkt_id, 4, buf, sizeof(buf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE, 0);
-//BRCM APSTA START
-#if defined(APSTA_CONCURRENT) && defined(SOFTAP)
-	if ( ap_net_dev ) {
-		printf("%s: apsta concurrent running, just add but don't enable rule id:%d\n", __FUNCTION__, pkt_id);
-		return 0;
-	}	
-#endif
-//BRCM APSTA END
 
 	if (!add) {
 		return 0;
@@ -1371,6 +1363,15 @@ int dhd_set_pktfilter(dhd_pub_t * dhd, int add, int id, int offset, char *mask, 
 
 	enable_parm.id = htod32(pkt_id);
 	enable_parm.enable = htod32(1);
+//BRCM APSTA START
+#if defined(APSTA_CONCURRENT) && defined(SOFTAP)
+	if ( ap_net_dev ) {
+		printf("%s: apsta concurrent running, just add but don't enable rule id:%d\n", __FUNCTION__, pkt_id);
+		enable_parm.enable = htod32(0);
+	} else
+		enable_parm.enable = htod32(1);
+#endif
+//BRCM APSTA END
 	bcm_mkiovar("pkt_filter_enable", (char *)&enable_parm,
 		sizeof(wl_pkt_filter_enable_t), buf, sizeof(buf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE , 0);

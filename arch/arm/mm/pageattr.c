@@ -39,19 +39,6 @@ static void inner_flush_cache_all(void)
 }
 
 #if defined(CONFIG_CPA)
-
-/*
- * The arm kernel uses different cache policies(CPOLICY_WRITEBACK,
- * CPOLICY_WRITEALLOC, CPOLICY_WRITETHROUGH) based on architecture version
- * and smp mode. Using L_PTE_MT_WRITEALLOC or L_PTE_MT_WRITEBACK or
- * L_PTE_MT_WRITETHROUGH directly in CPA code can result in restoring incorrect
- * PTE attributes.
- * pgprot_kernel would always have PTE attributes based on the cache policy
- * in use for kernel cache memory. Use this to set the correct PTE attributes
- * for kernel cache memory.
- * */
-#define L_PTE_MT_KERNEL (pgprot_kernel & L_PTE_MT_MASK)
-
 /*
  * The current flushing context - we pass it instead of 5 arguments:
  */
@@ -237,8 +224,7 @@ static inline pgprot_t pte_to_pmd_pgprot(unsigned long pte,
 {
 	pgprot_t ref_prot;
 
-	ref_prot = PMD_TYPE_SECT | PMD_DOMAIN(DOMAIN_KERNEL) |
-		   PMD_SECT_AP_WRITE;
+	ref_prot = PMD_TYPE_SECT | PMD_SECT_AP_WRITE;
 
 	if (pte & L_PTE_MT_BUFFERABLE)
 		ref_prot |= PMD_SECT_BUFFERABLE;
@@ -246,23 +232,17 @@ static inline pgprot_t pte_to_pmd_pgprot(unsigned long pte,
 	if (pte & L_PTE_MT_WRITETHROUGH)
 		ref_prot |= PMD_SECT_CACHEABLE;
 
-	if (pte & L_PTE_XN)
-		ref_prot |= PMD_SECT_XN;
-
-	if (pte & L_PTE_USER)
-		ref_prot |= PMD_SECT_AP_READ;
-
-	if (pte & (1 << 4))
-		ref_prot |= PMD_SECT_TEX(1);
-
-	if (pte & L_PTE_RDONLY)
-		ref_prot |= PMD_SECT_APX;
-
 	if (pte & L_PTE_SHARED)
 		ref_prot |= PMD_SECT_S;
 
-	if (pte & PTE_EXT_NG)
-		ref_prot |= PMD_SECT_nG;
+	if (pte & L_PTE_XN)
+		ref_prot |= PMD_SECT_XN;
+
+	if (pte & L_PTE_RDONLY)
+		ref_prot &= ~PMD_SECT_AP_WRITE;
+
+	ref_prot |= (ext_prot & (PTE_EXT_AP0 | PTE_EXT_AP1 | PTE_EXT_APX |
+			PTE_EXT_NG | (7 << 6))) << 6;
 
 	return ref_prot;
 }
@@ -270,10 +250,9 @@ static inline pgprot_t pte_to_pmd_pgprot(unsigned long pte,
 static inline pgprot_t pmd_to_pte_pgprot(unsigned long pmd,
 				unsigned long *ext_prot)
 {
-	pgprot_t ref_prot;
+	pgprot_t ref_prot = 0;
 
-	*ext_prot = 0;
-	ref_prot = L_PTE_PRESENT | L_PTE_YOUNG | L_PTE_DIRTY;
+	ref_prot |= L_PTE_PRESENT | L_PTE_YOUNG | L_PTE_DIRTY | L_PTE_RDONLY;
 
 	if (pmd & PMD_SECT_BUFFERABLE)
 		ref_prot |= L_PTE_MT_BUFFERABLE;
@@ -281,23 +260,18 @@ static inline pgprot_t pmd_to_pte_pgprot(unsigned long pmd,
 	if (pmd & PMD_SECT_CACHEABLE)
 		ref_prot |= L_PTE_MT_WRITETHROUGH;
 
-	if (pmd & PMD_SECT_XN)
-		ref_prot |= L_PTE_XN;
-
-	if (pmd & PMD_SECT_AP_READ)
-		ref_prot |= L_PTE_USER;
-
-	if (pmd & PMD_SECT_TEX(1))
-		ref_prot |= (1 << 4);
-
-	if (pmd & PMD_SECT_APX)
-		ref_prot |= L_PTE_RDONLY;
-
 	if (pmd & PMD_SECT_S)
 		ref_prot |= L_PTE_SHARED;
 
-	if (pmd & PMD_SECT_nG)
-		ref_prot |= PTE_EXT_NG;
+	if (pmd & PMD_SECT_XN)
+		ref_prot |= L_PTE_XN;
+
+	if (pmd & PMD_SECT_AP_WRITE)
+		ref_prot &= ~L_PTE_RDONLY;
+
+	/* AP/APX/TEX bits */
+	*ext_prot = (pmd & (PMD_SECT_AP_WRITE | PMD_SECT_AP_READ |
+			PMD_SECT_APX | PMD_SECT_nG | (7 << 12))) >> 6;
 
 	return ref_prot;
 }
@@ -421,7 +395,6 @@ try_preserve_large_page(pte_t *kpte, unsigned long address,
 	if (numpages < cpa->numpages)
 		cpa->numpages = numpages;
 
-	old_pte = *kpte;
 	old_prot = new_prot = req_prot = pmd_to_pte_pgprot(pmd_val(*kpte),
 						&ext_prot);
 
@@ -535,7 +508,6 @@ static int split_large_page(pte_t *kpte, unsigned long address)
 
 	ref_prot = pmd_to_pte_pgprot(pmd_val(*kpte), &ext_prot);
 
-	BUG_ON(ref_prot != pgprot_kernel);
 	/*
 	 * Get the target pfn from the original entry:
 	 */
@@ -794,7 +766,7 @@ static inline int cache_attr(pgprot_t attr)
 	 * We need to flush the cache for all memory type changes
 	 * except when a page is being marked write back cacheable
 	 */
-	return !((pgprot_val(attr) & L_PTE_MT_MASK) == L_PTE_MT_KERNEL);
+	return !((pgprot_val(attr) & L_PTE_MT_MASK) == L_PTE_MT_WRITEBACK);
 }
 
 static int change_page_attr_set_clr(unsigned long *addr, int numpages,
@@ -950,7 +922,7 @@ EXPORT_SYMBOL(set_memory_wc);
 int set_memory_wb(unsigned long addr, int numpages)
 {
 	return change_page_attr_set_clr(&addr, numpages,
-			__pgprot(L_PTE_MT_KERNEL),
+			__pgprot(L_PTE_MT_WRITEBACK),
 			__pgprot(L_PTE_MT_MASK),
 			0, 0, NULL);
 }
@@ -968,7 +940,7 @@ EXPORT_SYMBOL(set_memory_iwb);
 int set_memory_array_wb(unsigned long *addr, int addrinarray)
 {
 	return change_page_attr_set_clr(addr, addrinarray,
-			__pgprot(L_PTE_MT_KERNEL),
+			__pgprot(L_PTE_MT_WRITEBACK),
 			__pgprot(L_PTE_MT_MASK),
 			0, CPA_ARRAY, NULL);
 
@@ -1051,7 +1023,7 @@ EXPORT_SYMBOL(set_pages_array_wc);
 int set_pages_array_wb(struct page **pages, int addrinarray)
 {
 	return _set_pages_array(pages, addrinarray,
-			L_PTE_MT_KERNEL, L_PTE_MT_MASK);
+			L_PTE_MT_WRITEBACK, L_PTE_MT_MASK);
 }
 EXPORT_SYMBOL(set_pages_array_wb);
 

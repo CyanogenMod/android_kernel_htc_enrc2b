@@ -168,11 +168,12 @@ static int __init nvdumper_init(void)
 	return 0;
 }
 
-static void __exit nvdumper_exit(void)
+static int __exit nvdumper_exit(void)
 {
 	unregister_syscore_ops(&nvdumper_syscore_ops);
 	set_dirty_state(0);
 	iounmap(nvdumper_ptr);
+	return 0;
 }
 
 module_init(nvdumper_init);

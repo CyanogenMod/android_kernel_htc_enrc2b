@@ -290,10 +290,8 @@ static int rmnet_usb_suspend(struct usb_interface *iface, pm_message_t message)
 	retval = usbnet_suspend(iface, message);
 	if (!retval) {
 		if (message.event & PM_EVENT_SUSPEND) {
-			pr_info("%s :+usb_wait_anchor_empty_timeout\n", __func__);
 			time = usb_wait_anchor_empty_timeout(&dev->tx_submitted,
 								1000);
-			pr_info("%s :-usb_wait_anchor_empty_timeout\n", __func__);
 			if (!time)
 			{
 				pr_info("%s :+usb_kill_anchored_urbs\n", __func__);
@@ -765,6 +763,12 @@ static int rmnet_usb_probe(struct usb_interface *iface,
 	static int		first_rmnet_iface_num = -EINVAL;
 	int			status = 0;
 
+//++SSD_RIL:20120731: For tx/rx enable_hlt/disable_hlt
+	if( machine_is_evitareul() ) {
+		rnmet_usb_hlt_enabled = 1;
+		pr_info("%s:rnmet_usb_hlt_enabled = 1\n", __func__);
+	}
+//--SSD_RIL
 //++SSD_RIL:20120814: For CPU/Freq min default value
 	if ( rnmet_usb_hlt_enabled == 1 && get_radio_flag() & 0x0002 ) {
 		rnmet_usb_cpu_freq_enabled = 1;

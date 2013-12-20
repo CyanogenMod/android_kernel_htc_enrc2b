@@ -761,7 +761,7 @@ wldev_set_apsta(struct net_device *dev, bool enable)
 	printf("%s: enter\n", __FUNCTION__);
 
    	if (!dev) {
-                  printf("%s: dev is null\n", __FUNCTION__);
+                  WLDEV_ERROR(("%s: dev is null\n", __FUNCTION__));
                   return -1;
    	}
 
@@ -770,14 +770,14 @@ wldev_set_apsta(struct net_device *dev, bool enable)
 		wait_for_ap_ready(1); //broacom 0405
 
 		if ( ap_net_dev == NULL ) {
-                        printf("%s ap_net_dev == NULL\n", __FUNCTION__);
+                        WLDEV_ERROR(("%s ap_net_dev == NULL\n", __FUNCTION__));
                         goto fail;
 		}
 
 		//Hugh 2012-09-10 CT2 set Concr_mode ++++
 				concr_mode = 1;
 				if ((res = wldev_iovar_setint(dev, "concr_mode_set", concr_mode))) {
-						printf("%s fail to set concr_mode res 1[%d]\n", __FUNCTION__,res);
+						printf("%s fail to set concr_mode res[%d]\n", __FUNCTION__,res);
 				}
 		//Hugh 2012-09-10 CT2 set Concr_mode ++++
 
@@ -789,12 +789,12 @@ wldev_set_apsta(struct net_device *dev, bool enable)
 		
    		mpc = 0;
       	        if ((res = wldev_iovar_setint(dev, "mpc", mpc))) {
-           	        printf("%s fail to set mpc\n", __FUNCTION__);
+           	        WLDEV_ERROR(("%s fail to set mpc\n", __FUNCTION__));
            	        goto fail;
       	        }	
 
          	if ((res = wl_iw_set_ap_security(ap_net_dev, &ap_cfg)) != 0) {
-           	        printf(" %s ERROR setting SOFTAP security in :%d\n", __FUNCTION__, res);
+           	        WLDEV_ERROR((" %s ERROR setting SOFTAP security in :%d\n", __FUNCTION__, res));
          	        goto fail;
                 } 
                 
@@ -802,7 +802,7 @@ wldev_set_apsta(struct net_device *dev, bool enable)
                 bss_setbuf.val = 1;  /* up the interface */
 
                 if ((res = wldev_iovar_setbuf_bsscfg(dev, "bss", &bss_setbuf, sizeof(bss_setbuf), smbuf, sizeof(smbuf), 1, NULL)) < 0){
-           	         printf("%s: ERROR:%d, set bss up failed\n", __FUNCTION__, res);
+           	         WLDEV_ERROR(("%s: ERROR:%d, set bss up failed\n", __FUNCTION__, res));
            	         goto fail;
         	}
 
@@ -817,7 +817,7 @@ wldev_set_apsta(struct net_device *dev, bool enable)
 //HTC_WIFI_END [Hugh 2012-08-23 APSTA_CT3 tout ----]
 
 		if ((res = wldev_iovar_setint(dev, "allmulti", 1))) {
-            		printf("%s: ERROR:%d, set allmulti failed\n", __FUNCTION__, res);
+            		WLDEV_ERROR(("%s: ERROR:%d, set allmulti failed\n", __FUNCTION__, res));
             		goto fail;
 		}
 //BRCM_APSTA_START
@@ -826,14 +826,14 @@ wldev_set_apsta(struct net_device *dev, bool enable)
 //BRCM_APSTA_END
 	} else {
 		if ((res = wl_softap_stop(ap_net_dev))){
-           		printf("%s: ERROR:%d, call wl_softap_stop failed\n", __FUNCTION__, res);
+           		WLDEV_ERROR(("%s: ERROR:%d, call wl_softap_stop failed\n", __FUNCTION__, res));
            		goto fail;
 		}
 
 	//Hugh 2012-09-10 CT2 set Concr_mode ++++
 		concr_mode = 0;
 		if ((res = wldev_iovar_setint(dev, "concr_mode_set", concr_mode))) {
-				printf("%s fail to set concr_mode res 2[%d]\n", __FUNCTION__,res);
+				printf("%s fail to set concr_mode res[%d]\n", __FUNCTION__,res);
 			}
 	//Hugh 2012-09-10 CT2 set Concr_mode ++++
 
@@ -845,7 +845,7 @@ wldev_set_apsta(struct net_device *dev, bool enable)
 
 	mpc = 1;
 	     	if ((res = wldev_iovar_setint(dev, "mpc", mpc))) {
-        	   	printf("%s fail to set mpc\n", __FUNCTION__);
+        	   	WLDEV_ERROR(("%s fail to set mpc\n", __FUNCTION__));
            		goto fail;
 	      	}
 

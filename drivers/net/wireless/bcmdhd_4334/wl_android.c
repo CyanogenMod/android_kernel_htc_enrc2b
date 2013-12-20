@@ -60,8 +60,6 @@ extern void mmc_set_clock(struct mmc_host *host, unsigned int hz);
 extern PBCMSDH_SDMMC_INSTANCE gInstance;
 /*HTC_WIFI_END*/
 
-#include "../../../../arch/arm/mach-tegra/tegra_pmqos.h"
-
 /*
  * Android private command strings, PLEASE define new private commands here
  * so they can be updated easily in the future (if needed)
@@ -108,6 +106,12 @@ extern PBCMSDH_SDMMC_INSTANCE gInstance;
 #define CMD_AP_MAC_LIST_SET	"AP_MAC_LIST_SET"
 #define CMD_SCAN_MINRSSI_SET	"SCAN_MINRSSI"
 #define CMD_LOW_RSSI_SET	"LOW_RSSI_IND_SET"
+//HTC_CSP_START
+#define CMD_GET_TX_FAIL		"GET_TX_FAIL"
+#if defined(HTC_TX_TRACKING)
+#define CMD_TX_TRACKING		"SET_TX_TRACKING"
+#endif
+//HTC_CSP_END
 
 #if defined(SUPPORT_HIDDEN_AP)
 /* Hostapd private command */
@@ -418,28 +422,56 @@ static int traffic_stats_flag = TRAFFIC_STATS_NORMAL;
 static unsigned long current_traffic_count = 0;
 static unsigned long last_traffic_count = 0;
 
+#ifdef CONFIG_PERFLOCK
+#include <mach/perflock.h>
+#endif
 #include <linux/pm_qos_params.h>
 
+#ifdef CONFIG_PERFLOCK
+struct perf_lock wlan_perf_lock;
+#endif
 struct pm_qos_request_list req_freq;
 struct pm_qos_request_list req_cpus;
+#define PM_QOS_CPU_WIFI_FREQ_MAX_DEFAULT_VALUE 1600000
+#define PM_QOS_MAX_ONLINE_CPUS_WIFI_TWO_VALUE 2
+#define PM_QOS_MAX_ONLINE_CPUS_WIFI_FOUR_VALUE 4
 static int wlan_req_perflock_active = 0;
 
 void wlan_lock_perf(void)
 {
-	printk(KERN_INFO "[WLAN] %s, perf on\n", __func__);
-	pm_qos_update_request(&req_freq, (s32)WIFI_CPU_FREQ_MIN);
-	pm_qos_update_request(&req_cpus, (s32)WIFI_ONLINE_CPUS_MIN);
+#ifdef CONFIG_PERFLOCK
+	if (!is_perf_lock_active(&wlan_perf_lock))
+		perf_lock(&wlan_perf_lock);
+#endif
+	pm_qos_update_request(&req_freq, (s32)PM_QOS_CPU_WIFI_FREQ_MAX_DEFAULT_VALUE);
+	pm_qos_update_request(&req_cpus, (s32)PM_QOS_MAX_ONLINE_CPUS_WIFI_TWO_VALUE);
+}
+
+void wlan_lock_4cpu_perf(void)
+{
+#ifdef CONFIG_PERFLOCK
+	if (!is_perf_lock_active(&wlan_perf_lock))
+		perf_lock(&wlan_perf_lock);
+#endif
+	pm_qos_update_request(&req_freq, (s32)PM_QOS_CPU_WIFI_FREQ_MAX_DEFAULT_VALUE);
+	pm_qos_update_request(&req_cpus, (s32)PM_QOS_MAX_ONLINE_CPUS_WIFI_FOUR_VALUE);
 }
 
 void wlan_unlock_perf(void)
 {
-	printk(KERN_INFO "[WLAN] %s, perf off\n", __func__);
+#ifdef CONFIG_PERFLOCK
+	if (is_perf_lock_active(&wlan_perf_lock))
+		perf_unlock(&wlan_perf_lock);
+#endif
 	pm_qos_update_request(&req_freq, (s32)PM_QOS_CPU_FREQ_MIN_DEFAULT_VALUE);
 	pm_qos_update_request(&req_cpus, (s32)PM_QOS_MIN_ONLINE_CPUS_DEFAULT_VALUE);
 }
 
 void wlan_init_perf(void)
 {
+#ifdef CONFIG_PERFLOCK
+	perf_lock_init(&wlan_perf_lock, PERF_LOCK_HIGHEST, "bcmdhd");
+#endif
 	if(wlan_req_perflock_active == 0) {
 		pm_qos_add_request(&req_freq, PM_QOS_CPU_FREQ_MIN, (s32)PM_QOS_CPU_FREQ_MIN_DEFAULT_VALUE);
 		pm_qos_add_request(&req_cpus, PM_QOS_MIN_ONLINE_CPUS, (s32)PM_QOS_MIN_ONLINE_CPUS_DEFAULT_VALUE);
@@ -450,6 +482,10 @@ void wlan_init_perf(void)
 
 void wlan_deinit_perf(void)
 {
+#ifdef CONFIG_PERLOCK
+	if (is_perf_lock_active(&wlan_perf_lock))
+		perf_unlock(&wlan_perf_lock);
+#endif
 	if(wlan_req_perflock_active == 1) {
 		pm_qos_remove_request(&req_freq);
 		pm_qos_remove_request(&req_cpus);
@@ -575,6 +611,98 @@ static int wl_android_get_band(struct net_device *dev, char *command, int total_
 	if (error)
 		return -1;
 	bytes_written = snprintf(command, total_len, "Band %d", band);
+	return bytes_written;
+}
+
+//HTC_CSP_START
+#if defined(HTC_TX_TRACKING)
+static int wl_android_set_tx_tracking(struct net_device *dev, char *command, int total_len)
+{
+        int bytes_written = 0;
+        char iovbuf[32];
+        /* tx stat check, if (txerr/(txframe+txerr) > tx_stat_chk_ratio, send up event */
+        uint tx_stat_chk = 0; /* disable tx status check */
+        uint tx_stat_chk_prd = 5; /* check period 5 seconds */
+        uint tx_stat_chk_ratio = 8; /* check fail rate >= 80% */
+        uint tx_stat_chk_num = 5; /* check only if there is more than 5 packet send out in check period */
+
+        sscanf(command + strlen(CMD_TX_TRACKING) + 1, "%u %u %u %u", &tx_stat_chk, &tx_stat_chk_prd, &tx_stat_chk_ratio, &tx_stat_chk_num);
+        printf("wl_android_set_tx_tracking command=%s", command);
+        
+        memset(iovbuf, 0, sizeof(iovbuf));
+        bcm_mkiovar("tx_stat_chk_num", (char *)&tx_stat_chk_num, 4, iovbuf, sizeof(iovbuf));
+        wldev_ioctl(dev, WLC_SET_VAR, &iovbuf, sizeof(iovbuf), 1);
+
+        bcm_mkiovar("tx_stat_chk_ratio", (char *)&tx_stat_chk_ratio, 4, iovbuf, sizeof(iovbuf));
+        wldev_ioctl(dev, WLC_SET_VAR, &iovbuf, sizeof(iovbuf), 1);
+
+        bcm_mkiovar("tx_stat_chk_prd", (char *)&tx_stat_chk_prd, 4, iovbuf, sizeof(iovbuf));
+        wldev_ioctl(dev, WLC_SET_VAR, &iovbuf, sizeof(iovbuf), 1);
+
+        bcm_mkiovar("tx_stat_chk", (char *)&tx_stat_chk, 4, iovbuf, sizeof(iovbuf));
+        wldev_ioctl(dev, WLC_SET_VAR, &iovbuf, sizeof(iovbuf), 1);
+
+        return bytes_written;
+}
+#endif
+//HTC_CSP_END
+
+static uint32 last_txframes = 0xffffffff;
+static uint32 last_txretrans = 0xffffffff;
+static uint32 last_txerror = 0xffffffff;
+
+#define TX_FAIL_CHECK_COUNT		100
+static int wl_android_get_tx_fail(struct net_device *dev, char *command, int total_len)
+{
+	int bytes_written;
+	wl_cnt_t cnt;
+	int error = 0;
+	uint32 curr_txframes = 0;
+	uint32 curr_txretrans = 0;
+	uint32 curr_txerror = 0;
+	uint32 txframes_diff = 0;
+	uint32 txretrans_diff = 0;
+	uint32 txerror_diff = 0;
+	uint32 diff_ratio = 0;
+	uint32 total_cnt = 0;
+
+	memset(&cnt, 0, sizeof(wl_cnt_t));
+	strcpy((char *)&cnt, "counters");
+
+	if ((error = wldev_ioctl(dev, WLC_GET_VAR, &cnt, sizeof(wl_cnt_t), 0)) < 0) {
+		DHD_ERROR(("%s: get tx fail fail\n", __func__));
+		last_txframes = 0xffffffff;
+		last_txretrans = 0xffffffff;
+		last_txerror = 0xffffffff;
+		goto exit;
+	}
+
+	curr_txframes = cnt.txframe;
+	curr_txretrans = cnt.txretrans;
+    curr_txerror = cnt.txerror;
+    
+	if (last_txframes != 0xffffffff) {
+		if ((curr_txframes >= last_txframes) && (curr_txretrans >= last_txretrans) && (curr_txerror >= last_txerror)) {
+		    
+			txframes_diff = curr_txframes - last_txframes;
+			txretrans_diff = curr_txretrans - last_txretrans;
+			txerror_diff = curr_txerror - last_txerror;	
+			total_cnt = txframes_diff + txretrans_diff + txerror_diff;
+			
+			if (total_cnt > TX_FAIL_CHECK_COUNT) {
+				diff_ratio = ((txretrans_diff + txerror_diff)  * 100) / total_cnt;
+			}
+		}					
+	}
+	last_txframes = curr_txframes;
+	last_txretrans = curr_txretrans;
+	last_txerror = curr_txerror;
+
+exit:
+	printf("TXPER:%d, txframes: %d ,txretrans: %d, txerror: %d, total: %d\n", diff_ratio, txframes_diff, txretrans_diff, txerror_diff, total_cnt);
+	bytes_written = snprintf(command, total_len, "%s %d",
+		CMD_GET_TX_FAIL, diff_ratio);
+
 	return bytes_written;
 }
 
@@ -1487,9 +1615,6 @@ int wl_android_get_active_period(void)
 
 void wl_android_set_screen_off(int off)
 {
-	if (screen_off == off)
-		return;
-		
 	screen_off = off;
 	printf("wl_android_set_screen_off %d\n", screen_off);
 	if (screen_off)
@@ -1876,6 +2001,7 @@ static int wl_android_auto_channel(struct net_device *dev, char *command, int to
 	int isup = 0;
 	int bytes_written = 0;
 	int apsta_var = 0;
+	int band = WLC_BAND_2G;
 
 	DHD_TRACE(("Enter %s\n", __func__));
 
@@ -1912,11 +2038,12 @@ static int wl_android_auto_channel(struct net_device *dev, char *command, int to
 
 auto_channel_retry:
 	memset(&null_ssid, 0, sizeof(wlc_ssid_t));
-	null_ssid.SSID_len = strlen("test");
-	strncpy(null_ssid.SSID, "test", null_ssid.SSID_len);
+	null_ssid.SSID_len = strlen("");
+	strncpy(null_ssid.SSID, "", null_ssid.SSID_len);
 
 	res |= wldev_ioctl(dev, WLC_SET_SPECT_MANAGMENT, &spec, sizeof(spec), 1);
 	res |= wldev_ioctl(dev, WLC_SET_SSID, &null_ssid, sizeof(null_ssid), 1);
+	res |= wldev_ioctl(dev, WLC_SET_BAND, &band, sizeof(band), 1);
 	res |= wldev_ioctl(dev, WLC_UP, &updown, sizeof(updown), 1);
 
 	memset(&null_ssid, 0, sizeof(wlc_ssid_t));
@@ -1985,6 +2112,9 @@ get_channel_retry:
 		goto fail;
 	}
 
+	band = WLC_BAND_AUTO;
+	res |= wldev_ioctl(dev, WLC_SET_BAND, &band, sizeof(band), 1);
+
 fail :
 
 	bytes_written = snprintf(command, total_len, "%d", channel);
@@ -2010,7 +2140,9 @@ int wl_android_wifi_on(struct net_device *dev)
 
 	android_wifi_off = 0;
 	mutex_lock(&wl_wifionoff_mutex);
-
+/*HTC_CSP_START*/
+	wlan_lock_4cpu_perf();
+/*HTC_CSP_END*/
 	if (!g_wifi_on) {
 		do {
 			dhd_customer_gpio_wlan_ctrl(WLAN_RESET_ON);
@@ -2034,10 +2166,17 @@ int wl_android_wifi_on(struct net_device *dev)
 #ifdef PROP_TXSTATUS
 		dhd_wlfc_init(bcmsdh_get_drvdata());
 #endif
+		last_txframes = 0xffffffff;
+		last_txretrans = 0xffffffff;
+		last_txerror = 0xffffffff;
 		g_wifi_on = TRUE;
 	}
 
 exit:
+/*HTC_CSP_START*/
+	printf("%s, unlock CPU\n", __FUNCTION__);
+	wlan_unlock_perf();
+/*HTC_CSP_END*/
 	mutex_unlock(&wl_wifionoff_mutex);
 	return ret;
 }
@@ -2047,8 +2186,10 @@ int wl_android_wifi_off(struct net_device *dev)
 	int ret = 0;
 
 	printf("%s in\n", __FUNCTION__);
+	wlan_lock_4cpu_perf();
 	if (!dev) {
 		DHD_TRACE(("%s: dev is null\n", __FUNCTION__));
+		wlan_unlock_perf();
 		return -EINVAL;
 	}
 	android_wifi_off = 1;
@@ -2084,6 +2225,7 @@ int wl_android_wifi_off(struct net_device *dev)
 	mutex_unlock(&wl_wifionoff_mutex);
 	bcm_mdelay(500);
 	printf("%s unlock CPU\n", __FUNCTION__);
+	wlan_unlock_perf();
 
 	return ret;
 }
@@ -2504,11 +2646,25 @@ int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 	else if (strnicmp(command, CMD_GETBAND, strlen(CMD_GETBAND)) == 0) {
 		bytes_written = wl_android_get_band(net, command, priv_cmd.total_len);
 	}
+//HTC_CSP_START
+#if defined(HTC_TX_TRACKING)
+	else if (strnicmp(command, CMD_TX_TRACKING, strlen(CMD_TX_TRACKING)) == 0) {
+		bytes_written = wl_android_set_tx_tracking(net, command, priv_cmd.total_len);
+	}
+#endif
+//HTC_CSP_END
 #ifdef WL_CFG80211
 #ifndef CUSTOMER_SET_COUNTRY
 	/* CUSTOMER_SET_COUNTRY feature is define for only GGSM model */
 	else if (strnicmp(command, CMD_COUNTRY, strlen(CMD_COUNTRY)) == 0) {
+#if 1 /* For BCM4334 */
+		char country_code[3];
+		country_code[0] = *(command + strlen(CMD_COUNTRY) + 1);
+		country_code[1] = *(command + strlen(CMD_COUNTRY) + 2);
+		country_code[2] = '\0';
+#else
 		char *country_code = command + strlen(CMD_COUNTRY) + 1;
+#endif
 		bytes_written = wldev_set_country(net, country_code);
 		wl_update_wiphybands(NULL);
 	}
@@ -2586,6 +2742,9 @@ int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		int skip = strlen(CMD_P2P_SET_PS) + 1;
 		bytes_written = wl_cfg80211_set_p2p_ps(net, command + skip,
 			priv_cmd.total_len - skip);
+	}
+	else if (strnicmp(command, CMD_GET_TX_FAIL, strlen(CMD_GET_TX_FAIL)) == 0) {
+		bytes_written = wl_android_get_tx_fail(net, command, priv_cmd.total_len);
 	}
 #ifdef WL_CFG80211
 	else if (strnicmp(command, CMD_SET_AP_WPS_P2P_IE,

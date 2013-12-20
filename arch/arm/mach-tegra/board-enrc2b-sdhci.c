@@ -105,15 +105,19 @@ int __init enrc2b_init_wifi_mem(void)
 }
 /* HTC_WIFI_END */
 
+//#define EVITAUL_SD_CD TEGRA_GPIO_PI5
+
 static void (*wifi_status_cb)(int card_present, void *dev_id);
 static void *wifi_status_cb_devid;
 static int enrc2b_wifi_status_register(void (*callback)(int , void *), void *);
 
 static int enrc2b_wifi_reset(int on);
 /* HTC_WIFI_START */
+//static int enrc2b_wifi_power(int on);
+//static int enrc2b_wifi_set_carddetect(int val);
 int enrc2b_wifi_power(int on);
 int enrc2b_wifi_set_carddetect(int val);
-unsigned int enrc2b_wifi_status(struct device *dev);
+int enrc2b_wifi_status(struct device *dev);
 static int enrc2b_wifi_cd;		/* WIFI virtual 'card detect' status */
 /* HTC_WIFI_END */
 
@@ -157,6 +161,22 @@ static void emmc_resume_gpiocfg(void)
 {
 	DISABLE_GPIO(SDMMC4_CLK, CC4, NORMAL);
 }
+
+// No uSD
+#if 0
+static struct resource sdhci_resource0[] = {
+	[0] = {
+		.start  = INT_SDMMC1,
+		.end    = INT_SDMMC1,
+		.flags  = IORESOURCE_IRQ,
+	},
+	[1] = {
+		.start	= TEGRA_SDMMC1_BASE,
+		.end	= TEGRA_SDMMC1_BASE + TEGRA_SDMMC1_SIZE-1,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+#endif
 
 static struct resource sdhci_resource2[] = {
 	[0] = {
@@ -226,7 +246,7 @@ int enrc2b_wifi_suspend_gpio(void)
 	return 0;
 }
 
-void enrc2b_wifi_resume_gpio(void)
+int enrc2b_wifi_resume_gpio(void)
 {
 	printk("[WLAN] restore SDIO pins config by resume\n");
 	
@@ -242,7 +262,32 @@ void enrc2b_wifi_resume_gpio(void)
 	tegra_gpio_disable(WIFI_SDIO_D1);
 	tegra_gpio_disable(WIFI_SDIO_D2);
 	tegra_gpio_disable(WIFI_SDIO_D3);
+	
+	return 0;
 }
+
+// No uSD
+#if 0
+static struct tegra_sdhci_platform_data tegra_sdhci_platform_data0 = {
+	.mmc_data = {
+		.register_status_notify	= enrc2b_wifi_status_register,
+#ifdef CONFIG_MMC_EMBEDDED_SDIO
+		.embedded_sdio = &embedded_sdio_data0,
+#endif
+		/* FIXME need to revert the built_in change
+		once we use get the signal strength fix of
+		bcmdhd driver from broadcom for bcm4329 chipset*/
+		.built_in = 0,
+	},
+#ifndef CONFIG_MMC_EMBEDDED_SDIO
+	.pm_flags = MMC_PM_KEEP_POWER,
+#endif
+	.cd_gpio = -1,
+	.wp_gpio = -1,
+	.power_gpio = -1,
+	.max_clk_limit = 45000000,
+};
+#endif
 
 static struct tegra_sdhci_platform_data tegra_sdhci_platform_data2 = {
 	.mmc_data = {
@@ -272,6 +317,19 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data3 = {
 	.suspend_gpiocfg = emmc_suspend_gpiocfg,
 	.resume_gpiocfg = emmc_resume_gpiocfg,
 };
+
+// No uSD
+#if 0
+static struct platform_device tegra_sdhci_device0 = {
+	.name		= "sdhci-tegra",
+	.id		= 0,
+	.resource	= sdhci_resource0,
+	.num_resources	= ARRAY_SIZE(sdhci_resource0),
+	.dev = {
+		.platform_data = &tegra_sdhci_platform_data0,
+	},
+};
+#endif
 
 static struct platform_device tegra_sdhci_device2 = {
 	.name		= "sdhci-tegra",
@@ -305,7 +363,7 @@ static int enrc2b_wifi_status_register(
 }
 
 /* HTC_WIFI_START */
-unsigned int enrc2b_wifi_status(struct device *dev)
+int enrc2b_wifi_status(struct device *dev)
 {
 	return enrc2b_wifi_cd;
 }
@@ -331,7 +389,6 @@ int enrc2b_wifi_sdclk (int enable){
         tegra_gpio_enable(WIFI_SDIO_CLK);
         gpio_direction_output(WIFI_SDIO_CLK, 0);
     }
-    return 0;
 }
 
 //static int enrc2b_wifi_power(int on)
@@ -355,6 +412,15 @@ int enrc2b_wifi_power(int on)
 	}
 
 	return 0;
+/*	
+	pr_debug("%s: %d\n", __func__, on);
+	gpio_set_value(ENRC2B_WLAN_PWR, on);
+	mdelay(100);
+	gpio_set_value(ENRC2B_WLAN_RST, on);
+	mdelay(200);
+
+	return 0;
+*/
 }
 EXPORT_SYMBOL(enrc2b_wifi_power);
 /* HTC_WIFI_END */
@@ -392,11 +458,13 @@ static int __init enrc2b_wifi_init(void)
 
 	return 0;
 }
+extern bool wifi_isEvitarel;
 
 int __init enrc2b_sdhci_init(void)
 {
 	platform_device_register(&tegra_sdhci_device3);
 	platform_device_register(&tegra_sdhci_device2);
+	wifi_isEvitarel = false;
 	enrc2b_wifi_init();
 	return 0;
 }

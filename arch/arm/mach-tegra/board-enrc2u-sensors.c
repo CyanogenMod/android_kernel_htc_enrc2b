@@ -625,11 +625,11 @@ struct enrc2u_battery_gpio {
 		.label = _label,		\
 	}
 
-struct enrc2u_battery_gpio enrc2u_battery_gpio_data[] ={
+struct enrc2u_battery_gpio __initdata enrc2u_battery_gpio_data[] ={
 	[0] = TEGRA_BATTERY_GPIO(TEGRA_GPIO_PJ0, "mbat_in"),
 };
 
-static struct htc_battery_platform_data htc_battery_pdev_data = {
+static struct htc_battery_platform_data __initdata htc_battery_pdev_data = {
 	.gpio_mbat_in = -1,
 	.gpio_mbat_in_trigger_level = MBAT_IN_LOW_TRIGGER,
 	.guage_driver = GUAGE_TPS80032,
@@ -638,9 +638,25 @@ static struct htc_battery_platform_data htc_battery_pdev_data = {
 	.volt_adc_offset = 0,
 	.power_off_by_id = 0,
 	.sw_temp_25 = TEGRA_GPIO_INVALID,
+	.adc2temp_map = {{  22,  2918},
+			 { 989,   680},
+			 {1182,   600},
+			 {1231,   581},
+			 {1500,   480},
+			 {1582,   450},
+			 {1660,   420},
+			 {1844,   350},
+			 {2076,   250},
+			 {2263,   151},
+			 {2339,   100},
+			 {2401,    51},
+			 {2453,     1},
+			 {2572,  -203},
+			 {2620,  -529},
+			},
 };
 
-static struct platform_device htc_battery_pdev = {
+static struct platform_device __initdata htc_battery_pdev = {
 	.name	= "htc_battery",
 	.id	= -1,
 	.dev	= {

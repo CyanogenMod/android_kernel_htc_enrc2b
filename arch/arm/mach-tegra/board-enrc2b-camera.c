@@ -303,6 +303,7 @@ struct s5k3h2yx_platform_data enrc2b_s5k3h2yx_data =
 	.rawchip_need_powercycle = 1,
 	.mirror_flip = 0,
 	.use_rawchip = RAWCHIP_ENABLE,
+	.hardware = 1,
 };
 
 struct ov8838_platform_data enrc2b_ov8838_data =
@@ -448,10 +449,9 @@ static int enrc2b_s5k6a1gx03_power_on(void)
 
 static int enrc2b_s5k6a1gx03_power_off(void)
 {
+	pr_info("[CAM] %s ++", __func__);
 	int pcbid = htc_get_pcbid_info();
 
-	pr_info("[CAM] %s ++", __func__);
-	
 #if defined(CONFIG_RAWCHIP_ENABLE)
 	if ((pcbid >= PROJECT_PHASE_XB) || (pcbid == PROJECT_PHASE_EVM) || is_global_sku)
 	{
@@ -594,10 +594,8 @@ int enrc2b_cam_init(void)
 {
 	int ret;
 	int i = 0, j = 0;
-	int pcbid = htc_get_pcbid_info();
-	
 	pr_info("[CAM] %s ++", __func__);
-	
+	int pcbid = htc_get_pcbid_info();
 	for (i = 0; i < ARRAY_SIZE(enrc2b_cam_gpio_output_data); i++)
 	{
 		ret = gpio_request(enrc2b_cam_gpio_output_data[i].gpio,

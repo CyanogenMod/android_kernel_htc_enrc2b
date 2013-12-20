@@ -1,8 +1,6 @@
 #ifndef _CABLE_DETECT_H_
 #define _CABLE_DETECT_H_
 
-#include <linux/list.h>
-
 #define DOCK_STATE_UNDEFINED		-1
 #define DOCK_STATE_UNDOCKED		0
 #define DOCK_STATE_DESK			(1 << 0)

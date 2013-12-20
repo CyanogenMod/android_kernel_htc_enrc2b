@@ -3377,7 +3377,7 @@ thr_wait_for_2nd_eth_dev(void *data)
         DAEMONIZE("wl0_eth_wthread");
 
 
-        WL_SOFTAP(("\n>%s thread started:, PID:%x\n", __FUNCTION__, current->pid));
+        WL_SOFTAP(("%s thread started:, PID:%x\n", __FUNCTION__, current->pid));
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
         if (!iw) {
@@ -3392,7 +3392,7 @@ thr_wait_for_2nd_eth_dev(void *data)
 #else
         if (down_interruptible(&tsk_ctl->sema) != 0) {
 #endif
-                WL_ERROR(("\n%s: sap_eth_sema timeout \n", __FUNCTION__));
+                WL_ERROR(("%s: sap_eth_sema timeout \n", __FUNCTION__));
                 ret = -1;
                 goto fail;
         }
@@ -3411,7 +3411,7 @@ thr_wait_for_2nd_eth_dev(void *data)
                 goto fail;
         }
 
-        WL_TRACE(("\n>%s: Thread:'softap ethdev IF:%s is detected !!!'\n\n",
+        WL_TRACE(("%s: Thread:'softap ethdev IF:%s is detected !!!'\n\n",
                 __FUNCTION__, ap_net_dev->name));
 
         ap_cfg_running = TRUE;
@@ -3430,7 +3430,7 @@ fail:
 
         DHD_OS_WAKE_UNLOCK(iw->pub);
 
-        WL_TRACE(("\n>%s, thread completed\n", __FUNCTION__));
+        WL_TRACE(("%s, thread completed\n", __FUNCTION__));
 
         complete_and_exit(&tsk_ctl->completed, 0);
         return ret;
@@ -3802,6 +3802,7 @@ int set_ap_channel(struct net_device *dev, struct ap_profile *ap)
                 return res;
 }
 //BRCM_APSTA_END
+int turn_on_conap = 0;
 
 int set_apsta_cfg(struct net_device *dev, struct ap_profile *ap)
 {
@@ -3813,6 +3814,7 @@ int set_apsta_cfg(struct net_device *dev, struct ap_profile *ap)
         int iolen = 0;
         int mkvar_err = 0;
         int bsscfg_index = 1;
+		int err = 0;
         char buf[WLC_IOCTL_SMLEN];
 
         if (!dev) {
@@ -3834,9 +3836,23 @@ int set_apsta_cfg(struct net_device *dev, struct ap_profile *ap)
 
 
         if (ap_cfg_running == FALSE) {
+#if 0
                 /* broadcom, the apsta shall be ready when driver loading. */
                 dhd_state_set_flags( iw->pub, DHD_ATTACH_STATE_SOFTAP, 1);
                 sema_init(&ap_eth_ctl.sema, 0);
+#else
+                /* broadcom, the apsta shall be ready when driver loading. */
+				turn_on_conap = 1;
+                if(wlcfg_drv_priv){
+                    err = wl_cfgp2p_disable_discovery(wlcfg_drv_priv);
+                    printf("wl_cfgp2p_disable_discovery err = %d\n",err);
+                }
+				turn_on_conap = 0;
+                bcm_mdelay(100);
+
+                dhd_state_set_flags( iw->pub, DHD_ATTACH_STATE_SOFTAP, 1);
+                sema_init(&ap_eth_ctl.sema, 0);
+#endif
         } else {
 
                 if (!ap_net_dev) {

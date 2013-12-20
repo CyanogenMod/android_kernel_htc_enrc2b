@@ -46,7 +46,7 @@
 extern unsigned int host_dbg_flag;
 #define MODULE_NAME "[USBCHRv1] "
 
-extern int Modem_is_6360(void);
+extern int Modem_is_6360();
 
 /* HTC: debug flag */
 /*	chrlog1: ipc write file log for modem download */
@@ -407,6 +407,7 @@ static ssize_t baseband_ipc_file_read(struct baseband_ipc *ipc,
 	}
 
 	/* acquire rx buffer semaphores */
+retry:
 	if (down_interruptible(&ipc->buf_sem)) {
 		pr_err("baseband_ipc_file_read - "
 			"cannot acquire buffer semaphore\n");
@@ -1337,8 +1338,7 @@ static struct baseband_usb *baseband_usb_open(unsigned int vid,
 	err = baseband_usb_chr_rx_urb_submit(usb);
 	if (err < 0) {
 		pr_err("submit rx failed - err %d\n", err);
-		usb_free_urb(urb);
-		goto error_exit;
+		return -ENODEV;
 	}
 
 	chrlog4("baseband_usb_open }\n");

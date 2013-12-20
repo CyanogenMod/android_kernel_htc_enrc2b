@@ -59,6 +59,7 @@
 #include <mach/iomap.h>
 #include <mach/irqs.h>
 #include <mach/powergate.h>
+#include <mach/mfootprint.h>
 #include "board.h"
 #include "clock.h"
 #include "cpuidle.h"
@@ -71,8 +72,6 @@
 #include "timer.h"
 #include "dvfs.h"
 #include "cpu-tegra.h"
-
-#include "tegra_pmqos.h"
 
 struct suspend_context {
 	/*
@@ -180,6 +179,7 @@ struct suspend_context tegra_sctx;
 #define MC_SECURITY_SIZE	0x70
 #define MC_SECURITY_CFG2	0x7c
 
+#define AWAKE_CPU_FREQ_MIN	51000
 static struct pm_qos_request_list awake_cpu_freq_req;
 
 /*
@@ -1022,21 +1022,22 @@ static int tegra_suspend_prepare(void)
 
 static void tegra_suspend_finish(void)
 {
-	pr_info("tegra_suspend_finish: wake reason is 0x%x\n", (u32)wake_reason_resume);
-#if 0
-	if(pdata && (pdata->boost_resume_reason && ((u32)wake_reason_resume) !=
-		pdata->boost_resume_reason)) {
+	if((pdata->boost_resume_reason & (u32)wake_reason_resume) !=
+		wake_reason_resume) {
 		goto noboost;
 	}
 
 	if (pdata && pdata->cpu_resume_boost) {
-		int ret = tegra_suspended_target(tegra_get_suspend_boost_freq());
-		pr_info("tegra_suspend_finish: resume CPU boost to %u KHz: %s (%d)\n",
-			tegra_get_suspend_boost_freq(), ret ? "Failed" : "OK", ret);
+		int ret = tegra_suspended_target(pdata->cpu_resume_boost);
+		pr_info("Tegra: resume CPU boost to %u KHz: %s (%d)\n",
+			pdata->cpu_resume_boost, ret ? "Failed" : "OK", ret);
 	}
 
 noboost:
-#endif
+	wake_reason_resume = 0;
+	pr_info("wake reason is 0x%x\n", (u32)wake_reason_resume);
+	pr_info("board boost wake reason is 0x%x\n",
+			(u32)pdata->boost_resume_reason);
 	if ((current_suspend_mode == TEGRA_SUSPEND_LP0) && tegra_deep_sleep)
 		tegra_deep_sleep(0);
 }
@@ -1137,7 +1138,7 @@ void __init tegra_init_suspend(struct tegra_suspend_platform_data *plat)
 	tegra_cpu_rail = tegra_dvfs_get_rail_by_name("vdd_cpu");
 	tegra_core_rail = tegra_dvfs_get_rail_by_name("vdd_core");
 	pm_qos_add_request(&awake_cpu_freq_req, PM_QOS_CPU_FREQ_MIN,
-			   T3_CPU_MIN_FREQ);
+			   AWAKE_CPU_FREQ_MIN);
 
 	tegra_pclk = clk_get_sys(NULL, "pclk");
 	BUG_ON(IS_ERR(tegra_pclk));
@@ -1396,10 +1397,15 @@ static void delayed_adjusting_work(struct work_struct *work)
 
 static void pm_early_suspend(struct early_suspend *h)
 {
+	MF_DEBUG("00230000");
 	mutex_lock(&early_suspend_lock);
+	MF_DEBUG("00230001");
 	schedule_delayed_work(&delayed_adjust, msecs_to_jiffies(SCLK_ADJUST_DELAY));
-	pm_qos_update_request(&awake_cpu_freq_req, (s32)PM_QOS_CPU_FREQ_MIN_DEFAULT_VALUE);
+	MF_DEBUG("00230002");
+	pm_qos_update_request(&awake_cpu_freq_req, PM_QOS_DEFAULT_VALUE);
+	MF_DEBUG("00230003");
 	mutex_unlock(&early_suspend_lock);
+	MF_DEBUG("00230004");
 }
 
 static void pm_late_resume(struct early_suspend *h)
@@ -1410,7 +1416,7 @@ static void pm_late_resume(struct early_suspend *h)
 	cancel_delayed_work(&delayed_adjust);
 	if (clk_wake)
 		clk_enable(clk_wake);
-	pm_qos_update_request(&awake_cpu_freq_req, (s32)T3_CPU_MIN_FREQ);
+	pm_qos_update_request(&awake_cpu_freq_req, (s32)AWAKE_CPU_FREQ_MIN);
 	mutex_unlock(&early_suspend_lock);
 }
 

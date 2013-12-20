@@ -46,6 +46,11 @@ static LIST_HEAD(elv_list);
 /*
  * Merge hash stuff.
  */
+static const int elv_hash_shift = 6;
+#define ELV_HASH_BLOCK(sec)	((sec) >> 3)
+#define ELV_HASH_FN(sec)	\
+		(hash_long(ELV_HASH_BLOCK((sec)), elv_hash_shift))
+#define ELV_HASH_ENTRIES	(1 << elv_hash_shift)
 #define rq_hash_key(rq)		(blk_rq_pos(rq) + blk_rq_sectors(rq))
 
 /*
@@ -197,6 +202,7 @@ static struct elevator_queue *elevator_alloc(struct request_queue *q,
 				  struct elevator_type *e)
 {
 	struct elevator_queue *eq;
+	int i;
 
 	eq = kmalloc_node(sizeof(*eq), GFP_KERNEL | __GFP_ZERO, q->node);
 	if (unlikely(!eq))
@@ -206,7 +212,14 @@ static struct elevator_queue *elevator_alloc(struct request_queue *q,
 	eq->elevator_type = e;
 	kobject_init(&eq->kobj, &elv_ktype);
 	mutex_init(&eq->sysfs_lock);
-	hash_init(eq->hash);
+
+	eq->hash = kmalloc_node(sizeof(struct hlist_head) * ELV_HASH_ENTRIES,
+					GFP_KERNEL, q->node);
+	if (!eq->hash)
+		goto err;
+
+	for (i = 0; i < ELV_HASH_ENTRIES; i++)
+		INIT_HLIST_HEAD(&eq->hash[i]);
 
 	return eq;
 err:
@@ -221,6 +234,7 @@ static void elevator_release(struct kobject *kobj)
 
 	e = container_of(kobj, struct elevator_queue, kobj);
 	elevator_put(e->elevator_type);
+	kfree(e->hash);
 	kfree(e);
 }
 
@@ -290,7 +304,7 @@ EXPORT_SYMBOL(elevator_exit);
 
 static inline void __elv_rqhash_del(struct request *rq)
 {
-	hash_del(&rq->hash);
+	hlist_del_init(&rq->hash);
 }
 
 static void elv_rqhash_del(struct request_queue *q, struct request *rq)
@@ -304,7 +318,7 @@ static void elv_rqhash_add(struct request_queue *q, struct request *rq)
 	struct elevator_queue *e = q->elevator;
 
 	BUG_ON(ELV_ON_HASH(rq));
-	hash_add(e->hash, &rq->hash, rq_hash_key(rq));
+	hlist_add_head(&rq->hash, &e->hash[ELV_HASH_FN(rq_hash_key(rq))]);
 }
 
 static void elv_rqhash_reposition(struct request_queue *q, struct request *rq)
@@ -316,10 +330,11 @@ static void elv_rqhash_reposition(struct request_queue *q, struct request *rq)
 static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
 {
 	struct elevator_queue *e = q->elevator;
+	struct hlist_head *hash_list = &e->hash[ELV_HASH_FN(offset)];
 	struct hlist_node *entry, *next;
 	struct request *rq;
 
-	hash_for_each_possible_safe(e->hash, rq, entry, next, hash, offset) {
+	hlist_for_each_entry_safe(rq, entry, next, hash_list, hash) {
 		BUG_ON(!ELV_ON_HASH(rq));
 
 		if (unlikely(!rq_mergeable(rq))) {
@@ -588,41 +603,6 @@ void elv_requeue_request(struct request_queue *q, struct request *rq)
 	__elv_add_request(q, rq, ELEVATOR_INSERT_REQUEUE);
 }
 
-/**
- * elv_reinsert_request() - Insert a request back to the scheduler
- * @q:		request queue where request should be inserted
- * @rq:		request to be inserted
- *
- * This function returns the request back to the scheduler to be
- * inserted as if it was never dispatched
- *
- * Return: 0 on success, error code on failure
- */
-int elv_reinsert_request(struct request_queue *q, struct request *rq)
-{
-	int res;
-
-	if (!q->elevator->elevator_type->ops.elevator_reinsert_req_fn)
-		return -EPERM;
-
-	res = q->elevator->elevator_type->ops.elevator_reinsert_req_fn(q, rq);
-	if (!res) {
-		/*
-		 * it already went through dequeue, we need to decrement the
-		 * in_flight count again
-		 */
-		if (blk_account_rq(rq)) {
-			q->in_flight[rq_is_sync(rq)]--;
-			if (rq->cmd_flags & REQ_SORTED)
-				elv_deactivate_rq(q, rq);
-		}
-		rq->cmd_flags &= ~REQ_STARTED;
-		q->nr_sorted++;
-	}
-
-	return res;
-}
-
 void elv_drain_elevator(struct request_queue *q)
 {
 	static int printed;
@@ -827,11 +807,6 @@ void elv_completed_request(struct request_queue *q, struct request *rq)
 {
 	struct elevator_queue *e = q->elevator;
 
-	if (test_bit(REQ_ATOM_URGENT, &rq->atomic_flags)) {
-		q->notified_urgent = false;
-		q->dispatched_urgent = false;
-		blk_clear_rq_urgent(rq);
-	}
 	/*
 	 * request is released from the driver, io must be done
 	 */

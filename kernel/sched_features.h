@@ -3,13 +3,18 @@
  * them to run sooner, but does not allow tons of sleepers to
  * rip the spread apart.
  */
-SCHED_FEAT(GENTLE_FAIR_SLEEPERS, 0)
+SCHED_FEAT(GENTLE_FAIR_SLEEPERS, 1)
 
 /*
  * Place new tasks ahead so that they do not starve already running
  * tasks
  */
 SCHED_FEAT(START_DEBIT, 1)
+
+/*
+ * Should wakeups try to preempt running tasks.
+ */
+SCHED_FEAT(WAKEUP_PREEMPT, 1)
 
 /*
  * Based on load and program behaviour, see if it makes sense to place

@@ -36,6 +36,7 @@
 #include <mach/hardware.h>
 #include <mach/panel_id.h>
 #include <mach/board_htc.h>
+#include <mach/mfootprint.h>
 #include "board.h"
 #include "board-enrc2b.h"
 #include "devices.h"
@@ -67,11 +68,14 @@
 
 #ifdef CONFIG_TEGRA_DC
 static struct regulator *enrc2b_dsi_reg = NULL;
+static bool dsi_regulator_status = 0;
+static struct regulator *enrc2b_lcd_reg = NULL;
 static struct regulator *v_lcm_3v = NULL;
 static struct regulator *v_lcmio_1v8 = NULL;
 
 static struct regulator *enrc2b_hdmi_reg = NULL;
 static struct regulator *enrc2b_hdmi_pll = NULL;
+static struct regulator *enrc2b_hdmi_vddio = NULL;
 #endif
 
 #define LCM_TE		TEGRA_GPIO_PJ1
@@ -183,17 +187,19 @@ static bool g_display_on = true;
 
 static p_tegra_dc_bl_output bl_output;
 
+static bool kernel_1st_panel_init = true;
+
 #define BACKLIGHT_MAX 255
 
 #define ORIG_PWM_MAX 255
-#define ORIG_PWM_DEF 78
-#define ORIG_PWM_MIN 10
+#define ORIG_PWM_DEF 142
+#define ORIG_PWM_MIN 30
 
 #define MAP_PWM_MAX     255
 #define MAP_PWM_DEF     78
-#define MAP_PWM_MIN     5
+#define MAP_PWM_MIN     7
 
-#define MAP_PWM_LOW_DEF         50
+#define MAP_PWM_LOW_DEF         79
 #define MAP_PWM_HIGH_DEF        102
 
 static int max_pwm = MAP_PWM_MAX;
@@ -214,13 +220,15 @@ static unsigned char shrink_pwm(int val)
 	shrink_br = def_pwm +
 	(val-ORIG_PWM_DEF)*(max_pwm-def_pwm)/(ORIG_PWM_MAX-ORIG_PWM_DEF);
 
-	//pr_info("[DISP]brightness orig = %d, transformed=%d\n", val, shrink_br);
+	//pr_info("brightness orig = %d, transformed=%d\n", val, shrink_br);
 
 	return shrink_br;
 }
 
 static int enrc2b_backlight_notify(struct device *unused, int brightness)
 {
+	int cur_sd_brightness = atomic_read(&sd_brightness);
+
 	if (brightness > 0)
 		brightness = shrink_pwm(brightness);
 
@@ -241,7 +249,7 @@ static struct platform_tegra_pwm_backlight_data enrc2b_disp1_backlight_data = {
 	.gpio_conf_to_sfio	= TEGRA_GPIO_PW1,
 	.switch_to_sfio		= &tegra_gpio_disable,
 	.max_brightness		= 255,
-	.dft_brightness		= 78,
+	.dft_brightness		= 142,
 	.notify		= enrc2b_backlight_notify,
 	.period			= 0xFF,
 	.clk_div		= 20,
@@ -250,8 +258,9 @@ static struct platform_tegra_pwm_backlight_data enrc2b_disp1_backlight_data = {
 	/* Only toggle backlight on fb blank notifications for disp1 */
 	.check_fb	= enrc2b_disp1_check_fb,
 	.backlight_status	= BACKLIGHT_ENABLE,
-	.dimming_enable	= true,
 	.cam_launch_bkl_value = 181,
+	.dimming_off_cmd = NULL,
+	.n_dimming_off_cmd = NULL,
 };
 
 static struct platform_device enrc2b_disp1_backlight_device = {
@@ -338,12 +347,14 @@ static struct resource enrc2b_disp2_resources[] = {
 		.end	= TEGRA_DISPLAY2_BASE + TEGRA_DISPLAY2_SIZE - 1,
 		.flags	= IORESOURCE_MEM,
 	},
+#if 0
 	{
 		.name	= "fbmem",
 		.flags	= IORESOURCE_MEM,
 		.start	= 0,
 		.end	= 0,
 	},
+#endif
 	{
 		.name	= "hdmi_regs",
 		.start	= TEGRA_HDMI_BASE,
@@ -353,100 +364,7 @@ static struct resource enrc2b_disp2_resources[] = {
 };
 
 static struct tegra_dc_sd_settings enrc2b_sd_settings = {
-#ifndef CONFIG_SMARTDIMMER
 	.enable = 0, /* Normal mode operation */
-#else
-	// smartdimmer config
-	// https://android.googlesource.com/kernel/tegra/+/a3afaafbd1075ed6ca3986a417282f7b2621bd75/arch/arm/mach-tegra/board-grouper-panel.c
-	.enable = 0, /* disabled by default. */
-    .use_auto_pwm = false,
-	.hw_update_delay = 0,
-	.bin_width = -1,
-	.aggressiveness = 1,
-	.phase_in_adjustments = true,
-	.use_vid_luma = false,
-	/* Default video coefficients */
-	.coeff = {5, 9, 2},
-	.fc = {0, 0},
-	/* Immediate backlight changes */
-	.blp = {1024, 255},
-	/* Gammas: R: 2.2 G: 2.2 B: 2.2 */
-	/* Default BL TF */
-	.bltf = {
-                        {
-                                {57, 65, 74, 83},
-                                {93, 103, 114, 126},
-                                {138, 151, 165, 179},
-                                {194, 209, 225, 242},
-                        },
-                        {
-                                {58, 66, 75, 84},
-                                {94, 105, 116, 127},
-                                {140, 153, 166, 181},
-                                {196, 211, 227, 244},
-                        },
-                        {
-                                {60, 68, 77, 87},
-                                {97, 107, 119, 130},
-                                {143, 156, 170, 184},
-                                {199, 215, 231, 248},
-                        },
-                        {
-                                {64, 73, 82, 91},
-                                {102, 113, 124, 137},
-                                {149, 163, 177, 192},
-                                {207, 223, 240, 255},
-                        },
-                },
-	/* Default LUT */
-	.lut = {
-                        {
-                                {250, 250, 250},
-                                {194, 194, 194},
-                                {149, 149, 149},
-                                {113, 113, 113},
-                                {82, 82, 82},
-                                {56, 56, 56},
-                                {34, 34, 34},
-                                {15, 15, 15},
-                                {0, 0, 0},
-                        },
-                        {
-                                {246, 246, 246},
-                                {191, 191, 191},
-                                {147, 147, 147},
-                                {111, 111, 111},
-                                {80, 80, 80},
-                                {55, 55, 55},
-                                {33, 33, 33},
-                                {14, 14, 14},
-                                {0, 0, 0},
-                        },
-                        {
-                                {239, 239, 239},
-                                {185, 185, 185},
-                                {142, 142, 142},
-                                {107, 107, 107},
-                                {77, 77, 77},
-                                {52, 52, 52},
-                                {30, 30, 30},
-                                {12, 12, 12},
-                                {0, 0, 0},
-                        },
-                        {
-                                {224, 224, 224},
-                                {173, 173, 173},
-                                {133, 133, 133},
-                                {99, 99, 99},
-                                {70, 70, 70},
-                                {46, 46, 46},
-                                {25, 25, 25},
-                                {7, 7, 7},
-                                {0, 0, 0},
-                        },
-                },
-    .sd_brightness = &sd_brightness,
-#endif
 	.bl_device = &enrc2b_disp1_backlight_device,
 };
 
@@ -475,10 +393,6 @@ static struct tegra_dc_out enrc2b_disp2_out = {
 	.disable	= enrc2b_hdmi_disable,
 	.postsuspend	= enrc2b_hdmi_vddio_disable,
 	.hotplug_init	= enrc2b_hdmi_vddio_enable,
-
-#ifndef CONFIG_SMARTDIMMER	
-	.sd_settings  = &enrc2b_sd_settings,
-#endif
 };
 
 static struct tegra_dc_platform_data enrc2b_disp2_pdata = {
@@ -703,11 +617,21 @@ static struct tegra_dsi_cmd nt_still_mode_cmd[] = {
 };
 /*  --- -------------------------------------------  ---*/
 
+/* ----------  CABC cmd for dimming on/off  ------------ */
+static struct tegra_dsi_cmd dimming_on_cmd[] = {
+	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+};
+
+static u8 dimming_off_cmd[] = {0x53,0x24,0x51,0x00};
+
+/* ----------------------------------------------------- */
+
 /*initial command for sharp panel*/
 static u8 init_cmd[] = {0xB9,0xFF,0x83,0x92};
 static u8 eq_cmd[] = {0xD5,0x00,0x00,0x02};
 static u8 ptbf_cmd[] = {0xBF,0x05,0x60,0x02};
 static u8 pwm_freq_hx[] = {0xC9,0x1F,0x01};
+static u8 porch[] = {0x3B,0x03,0x03,0x07,0x02,0x02};
 static u8 flash_issue[] = {0xC6,0x35,0x00,0x00,0x04};
 static u8 dsi_set[] = {0xBA,0x11,0x83,0x00,0xD6,0xC6,0x00,0x0A};
 static u8 stba[] = {0xC0,0x01,0x94};
@@ -1248,7 +1172,7 @@ static struct tegra_dsi_cmd dsi_init_sony_nt_c1_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -1699,7 +1623,7 @@ static struct tegra_dsi_cmd dsi_init_sony_nt_c2_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -2165,7 +2089,7 @@ static struct tegra_dsi_cmd dsi_init_sharp_nt_c1_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -2610,7 +2534,7 @@ static struct tegra_dsi_cmd dsi_init_sharp_nt_c2_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -3061,7 +2985,7 @@ static struct tegra_dsi_cmd dsi_init_sharp_nt_c2_9a_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -4252,7 +4176,7 @@ static void bkl_do_work(struct work_struct *work)
 {
 	struct backlight_device *bl = platform_get_drvdata(&enrc2b_disp1_backlight_device);
 	if (bl) {
-		DISP_DEBUG_LN("set backlight after resume %d", bl->props.brightness);
+		DISP_DEBUG_LN("set backlight after resume");
 		bl->props.bkl_on = 1;
 		backlight_update_status(bl);
 	}
@@ -4271,27 +4195,56 @@ struct early_suspend enrc2b_panel_early_suspender;
 
 static void enrc2b_panel_early_suspend(struct early_suspend *h)
 {
+	MF_DEBUG("00240000");
 	struct backlight_device *bl = platform_get_drvdata(&enrc2b_disp1_backlight_device);
+	MF_DEBUG("00240001");
 
 	DISP_INFO_IN();
 
+	MF_DEBUG("00240002");
 	if (bl && bl->props.bkl_on) {
 		bl->props.bkl_on = 0;
+	MF_DEBUG("00240003");
 		del_timer_sync(&bkl_timer);
+	MF_DEBUG("00240004");
 		flush_workqueue(bkl_wq);
+	MF_DEBUG("00240005");
 	}
 
 	/* power down LCD, add use a black screen for HDMI */
 	if (num_registered_fb > 0)
 	{
+	MF_DEBUG("00240006");
 		fb_blank(registered_fb[0], FB_BLANK_POWERDOWN);
+	MF_DEBUG("00240007");
 	}
 	if (num_registered_fb > 1)
 	{
+	MF_DEBUG("00240008");
 		fb_blank(registered_fb[1], FB_BLANK_NORMAL);
+	MF_DEBUG("00240009");
 	}
+#ifdef CONFIG_TEGRA_CONVSERVATIVE_GOV_ON_EARLYSUPSEND
+	MF_DEBUG("00240010");
+	cpufreq_save_default_governor();
+	MF_DEBUG("00240011");
+	cpufreq_set_conservative_governor();
+	MF_DEBUG("00240012");
+	cpufreq_set_conservative_governor_param("up_threshold",
+			SET_CONSERVATIVE_GOVERNOR_UP_THRESHOLD);
 
+	MF_DEBUG("00240013");
+	cpufreq_set_conservative_governor_param("down_threshold",
+			SET_CONSERVATIVE_GOVERNOR_DOWN_THRESHOLD);
+
+	MF_DEBUG("00240014");
+	cpufreq_set_conservative_governor_param("freq_step",
+			SET_CONSERVATIVE_GOVERNOR_FREQ_STEP);
+#endif
+
+	MF_DEBUG("00240015");
 	DISP_INFO_OUT();
+	MF_DEBUG("00240016");
 }
 
 
@@ -4302,6 +4255,9 @@ static void enrc2b_panel_late_resume(struct early_suspend *h)
 
 	DISP_INFO_IN();
 
+#ifdef CONFIG_TEGRA_CONVSERVATIVE_GOV_ON_EARLYSUPSEND
+	cpufreq_restore_default_governor();
+#endif
 	for (i = 0; i < num_registered_fb; i++)
 		fb_blank(registered_fb[i], FB_BLANK_UNBLANK);
 
@@ -4318,7 +4274,7 @@ static struct dentry *bkl_debugfs_root;
 
 static int bkl_calibration_get(void *data, u64 *val)
 {
-	*val = (u64)def_pwm;
+	DISP_INFO_LN("def_pwm = %d\n",def_pwm);
 	return 0;
 }
 
@@ -4452,35 +4408,28 @@ int __init enrc2b_panel_init(void)
 	/*switch initial command by panel_id*/
 	switch (PANEL_MASK(g_panel_id)) {
 		case PANEL_ID_SHARP_HX_C3:
-            DISP_INFO_LN("panel_id = PANEL_ID_SHARP_HX_C3\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_hx_c3_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sharp_hx_c3_cmd;
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(hx_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = hx_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = hx_still_mode_cmd;
-			enrc2b_disp1_backlight_data.dimming_enable = false;
 		break;
 		case PANEL_ID_SHARP_HX_C4:
-            DISP_INFO_LN("panel_id = PANEL_ID_SHARP_HX_C4\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_hx_c4_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sharp_hx_c4_cmd;
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(hx_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = hx_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = hx_still_mode_cmd;
-			enrc2b_disp1_backlight_data.dimming_enable = false;
 		break;
 		case PANEL_ID_SHARP_HX_C5:
 		case PANEL_ID_SHARP_HX:
-            DISP_INFO_LN("panel_id = PANEL_ID_SHARP_HX_C5\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_hx_c5_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sharp_hx_c5_cmd;
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(hx_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = hx_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = hx_still_mode_cmd;
-			enrc2b_disp1_backlight_data.dimming_enable = false;
 		break;
 		case PANEL_ID_SONY_NT_C1:
-            DISP_INFO_LN("panel_id = PANEL_ID_SONY_NT_C1\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sony_nt_c1_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sony_nt_c1_cmd;
 
@@ -4491,10 +4440,13 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SONY_NT_C2:
 		case PANEL_ID_SONY:
-            DISP_INFO_LN("panel_id = PANEL_ID_SONY_NT_C2\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sony_nt_c2_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sony_nt_c2_cmd;
 
@@ -4505,9 +4457,12 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP_NT_C1:
-            DISP_INFO_LN("panel_id = PANEL_ID_SHARP_NT_C1\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c1_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sharp_nt_c1_cmd;
 			enrc2b_dsi.refresh_rate = 60;
@@ -4520,9 +4475,12 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP_NT_C2:
-            DISP_INFO_LN("panel_id = PANEL_ID_SHARP_NT_C2\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c2_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sharp_nt_c2_cmd;
 
@@ -4533,9 +4491,12 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP_NT_C2_9A:
-            DISP_INFO_LN("panel_id = PANEL_ID_SHARP_NT_C2_9A\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c2_9a_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sharp_nt_c2_9a_cmd;
 
@@ -4546,14 +4507,16 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP:
-            DISP_INFO_LN("panel_id = PANEL_ID_SHARP\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_unknow_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sharp_unknow_cmd;
 		break;
 		case PANEL_ID_AUO_NT_C2:
-            DISP_INFO_LN("panel_id = PANEL_ID_AUO_NT_C2\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_auo_nt_c2_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_auo_nt_c2_cmd;
 
@@ -4564,7 +4527,6 @@ int __init enrc2b_panel_init(void)
 		break;
 		case PANEL_ID_AUO_NT_X7:
 		case PANEL_ID_AUO:
-            DISP_INFO_LN("panel_id = PANEL_ID_AUO_NT_X7\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_auo_nt_x7_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_auo_nt_x7_cmd;
 
@@ -4574,7 +4536,6 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.osc_on_cmd = osc_on_cmd;
 		break;
 		default:
-            DISP_INFO_LN("panel_id = PANEL_ID_SHARP_NT_C2_9A\n");
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c2_9a_cmd);
 			enrc2b_dsi.dsi_init_cmd = dsi_init_sharp_nt_c2_9a_cmd;
 
@@ -4616,7 +4577,7 @@ int __init enrc2b_panel_init(void)
 				ARRAY_SIZE(enrc2b_bl_devices));
 	INIT_WORK(&bkl_work, bkl_do_work);
 	bkl_wq = create_workqueue("bkl_wq");
-	setup_timer(&bkl_timer, bkl_update, 0L);
+	setup_timer(&bkl_timer, bkl_update, NULL);
 
 	bkl_debugfs_root = debugfs_create_dir("backlight", NULL);
 

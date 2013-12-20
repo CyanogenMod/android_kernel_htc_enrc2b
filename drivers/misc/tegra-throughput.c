@@ -47,12 +47,12 @@ static void set_throughput_hint(struct work_struct *work)
 #define MAX_ZERO_FRAME_COUNT 5000
 static int zero_frame_count = 0;
 
-static void throughput_flip_callback(void)
+static int throughput_flip_callback(void)
 {
 	target_frame_time = tegra_dc_get_frame_time();
 	/* only register flips when a single app is active */
 	if (multiple_app_disable)
-		return;
+		return NOTIFY_DONE;
 	else {
 		long timediff;
 		ktime_t now;
@@ -72,7 +72,7 @@ static void throughput_flip_callback(void)
 						pr_warn("%s: flips %lld nsec apart zero_frame_count = %d\n",
 							__func__, now.tv64 - last_flip.tv64, zero_frame_count);
 				}
-				return;
+				return NOTIFY_DONE;
 			}
 
 			throughput_hint =
@@ -84,7 +84,7 @@ static void throughput_flip_callback(void)
 		last_flip = now;
 	}
 
-	return;
+	return NOTIFY_OK;
 }
 
 static int sync_rate;

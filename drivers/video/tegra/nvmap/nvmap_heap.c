@@ -3,7 +3,7 @@
  *
  * GPU heap allocator.
  *
- * Copyright (c) 2012, NVIDIA Corporation.
+ * Copyright (c) 2011, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -420,9 +420,6 @@ static struct nvmap_heap_block *do_heap_alloc(struct nvmap_heap *heap,
 		list_for_each_entry(i, &heap->free_list, free_list) {
 			size_t fix_size;
 			fix_base = ALIGN(i->block.base, align);
-			if(!fix_base || fix_base >= i->block.base + i->size)
-				continue;
-
 			fix_size = i->size - (fix_base - i->block.base);
 
 			/* needed for compaction. relocated chunk
@@ -720,7 +717,7 @@ static struct nvmap_heap_block *do_heap_relocate_listblock(
 	if (atomic_read(&handle->pin))
 		goto fail;
 	/* abort if block is mapped */
-	if (handle->usecount)
+	if (atomic_read(&handle->usecount))
 		goto fail;
 
 	if (fast) {
@@ -829,19 +826,24 @@ static void nvmap_heap_compact(struct nvmap_heap *heap,
 
 void nvmap_usecount_inc(struct nvmap_handle *h)
 {
-	if (h->alloc && !h->heap_pgalloc) {
+#ifdef CONFIG_NVMAP_CARVEOUT_COMPACTOR
+	if (h && !h->heap_pgalloc) {
 		mutex_lock(&h->lock);
-		h->usecount++;
+		atomic_inc(&h->usecount);
 		mutex_unlock(&h->lock);
-	} else {
-		h->usecount++;
 	}
+#endif
 }
 
 
 void nvmap_usecount_dec(struct nvmap_handle *h)
 {
-	h->usecount--;
+#ifdef CONFIG_NVMAP_CARVEOUT_COMPACTOR
+	if (h && !h->heap_pgalloc) {
+		BUG_ON(atomic_read(&h->usecount) == 0);
+		atomic_dec(&h->usecount);
+	}
+#endif
 }
 
 /* nvmap_heap_alloc: allocates a block of memory of len bytes, aligned to

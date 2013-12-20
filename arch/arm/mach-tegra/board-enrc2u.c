@@ -552,7 +552,6 @@ static struct platform_device tegra_rawchip_device = {
 
 /* HTC_HEADSET_GPIO Driver */
 static struct htc_headset_gpio_platform_data htc_headset_gpio_data = {
-	.eng_cfg		= HS_ENRC2_U_XB,
 	.hpin_gpio		= TEGRA_GPIO_PW2,
 	.key_gpio		= TEGRA_GPIO_PBB6,
 	.key_enable_gpio	= 0,
@@ -569,7 +568,6 @@ static struct platform_device htc_headset_gpio = {
 
 /* HTC_HEADSET_MICROP Driver */
 static struct htc_headset_microp_platform_data htc_headset_microp_data = {
-	.eng_cfg			= HS_ENRC2_U_XB,
 	.remote_int		= 1 << 13,
 //	.remote_irq		= TEGRA_uP_TO_INT(13),
 	.remote_enable_pin	= 0,
@@ -587,10 +585,10 @@ static struct platform_device htc_headset_microp = {
 
 /* HTC_HEADSET_PMIC Driver */
 static struct htc_headset_pmic_platform_data htc_headset_pmic_data_xe = {
-	.eng_cfg		= HS_ENRC2_U_XB,
-	.driver_flag	= DRIVER_HS_PMIC_RPC_KEY,
-	.adc_mic_bias	= {HS_DEF_MIC_ADC_12_BIT_MIN,
-				   HS_DEF_MIC_ADC_12_BIT_MAX},
+	.driver_flag	= DRIVER_HS_PMIC_ADC,
+	.adc_mic_bias	= {HS_DEF_MIC_ADC_16_BIT_MIN,
+				   HS_DEF_MIC_ADC_16_BIT_MAX},
+	.adc_channel	= 4,
 	.adc_remote	= {0, 164, 165, 379, 380, 830},
 };
 
@@ -655,8 +653,8 @@ static struct platform_device htc_headset_one_wire = {
 static struct platform_device *headset_devices_xe[] = {
 //	&htc_headset_microp,
 	&htc_headset_pmic_xe,
-	&htc_headset_gpio,
 	&htc_headset_one_wire,
+	&htc_headset_gpio,
 //	&htc_headset_misc,
 	/* Please put the headset detection driver on the last */
 };
@@ -699,10 +697,9 @@ static void uart_lv_shift_en(int enable)
 }
 
 static struct htc_headset_mgr_platform_data htc_headset_mgr_data_xe = {
-	.eng_cfg				= HS_ENRC2_U_XB,
+	.driver_flag		= DRIVER_HS_MGR_FLOAT_DET,
 	.headset_devices_num	= ARRAY_SIZE(headset_devices_xe),
 	.headset_devices	= headset_devices_xe,
-	.enable_1wire			= 0,
 	.headset_config_num	= ARRAY_SIZE(htc_headset_mgr_config_xe),
 	.headset_config		= htc_headset_mgr_config_xe,
 	.headset_init		= headset_init,

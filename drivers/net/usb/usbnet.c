@@ -49,8 +49,6 @@
 #include <linux/pm_runtime.h>
 #include <linux/pm_qos_params.h> //HTC
 
-#include "../../../arch/arm/mach-tegra/tegra_pmqos.h"
-
 #define DRIVER_VERSION		"22-Aug-2005"
 
 //++SSD_RIL:20121017: get -71 but already register rmnet netdev
@@ -103,9 +101,15 @@ MODULE_PARM_DESC (msg_level, "Override default message level");
 #define USBNET_DONE_QUEUE_HIGH_WATERMARK 1000
 #define USBNET_DONE_QUEUE_LOW_WATERMARK 5
 #define PM_QOS_USBNET_PERF_UNLOCK_TIMER 3000
+#define PM_QOS_USBNET_CPU_FREQ_MIN_VALUE 475000
+#define PM_QOS_USBNET_MIN_ONLINE_CPUS 2
 
+#ifdef CONFIG_PERFLOCK
+static struct perf_lock usbnet_perf_lock;
+#endif
 static struct pm_qos_request_list usbnet_req_freq;
 static struct pm_qos_request_list usbnet_req_cpus;
+static int is_usbnet_perf_locked = 0;
 static struct	delayed_work usbnet_unlock_perf_delayed_work;
 static unsigned int usbnet_rx_len = 0;
 
@@ -113,16 +117,28 @@ static void usbnet_lock_perf(void)
 {
 	pr_info("[USBNET] %s\n", __func__);
 
+#ifdef CONFIG_PERFLOCK
+	if (!is_perf_lock_active(&usbnet_perf_lock))
+		perf_lock(&usbnet_perf_lock);
+#endif
 	pm_qos_update_request(&usbnet_req_freq, (s32)PM_QOS_USBNET_CPU_FREQ_MIN_VALUE);
 	pm_qos_update_request(&usbnet_req_cpus, (s32)PM_QOS_USBNET_MIN_ONLINE_CPUS);
+
+	is_usbnet_perf_locked = 1;
 }
 
 static void usbnet_unlock_perf(void)
 {
 	pr_info("[USBNET] %s\n", __func__);
 
+#ifdef CONFIG_PERFLOCK
+	if (is_perf_lock_active(&usbnet_perf_lock))
+		perf_unlock(&usbnet_perf_lock);
+#endif
 	pm_qos_update_request(&usbnet_req_freq, (s32)PM_QOS_CPU_FREQ_MIN_DEFAULT_VALUE);
 	pm_qos_update_request(&usbnet_req_cpus, (s32)PM_QOS_MIN_ONLINE_CPUS_DEFAULT_VALUE);
+
+	is_usbnet_perf_locked = 0;
 }
 
 static void usbnet_unlock_perf_delayed_work_fn(struct work_struct *work)
@@ -726,9 +742,6 @@ static void usbnet_terminate_urbs(struct usbnet *dev)
 	temp = unlink_urbs(dev, &dev->txq) +
 		unlink_urbs(dev, &dev->rxq);
 
-
-pr_info("%s+\n", __func__);
-
 	/* maybe wait for deletions to finish. */
 	while (!skb_queue_empty(&dev->rxq)
 		&& !skb_queue_empty(&dev->txq)
@@ -742,8 +755,6 @@ pr_info("%s+\n", __func__);
 	set_current_state(TASK_RUNNING);
 	dev->wait = NULL;
 	remove_wait_queue(&unlink_wakeup, &wait);
-
-	pr_info("%s-\n", __func__);
 }
 
 int usbnet_stop (struct net_device *net)
@@ -1616,8 +1627,6 @@ int usbnet_suspend (struct usb_interface *intf, pm_message_t message)
 {
 	struct usbnet		*dev = usb_get_intfdata(intf);
 
-	pr_info("%s+\n", __func__);
-
 	if (!dev->suspend_count++) {
 		spin_lock_irq(&dev->txq.lock);
 		/* don't autosuspend while transmitting */
@@ -1633,21 +1642,16 @@ int usbnet_suspend (struct usb_interface *intf, pm_message_t message)
 		 * accelerate emptying of the rx and queues, to avoid
 		 * having everything error out.
 		 */
-		pr_info("%s+:d\n", __func__);
 		netif_device_detach (dev->net);
-		pr_info("%s+:t\n", __func__);
 		usbnet_terminate_urbs(dev);
-		pr_info("%s+:k\n", __func__);
 		usb_kill_urb(dev->interrupt);
 
 		/*
 		 * reattach so runtime management can use and
 		 * wake the device
 		 */
-		pr_info("%s+:a\n", __func__);
 		netif_device_attach (dev->net);
 	}
-	pr_info("%s-\n", __func__);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(usbnet_suspend);
@@ -1709,6 +1713,9 @@ static int __init usbnet_init(void)
 
 	//HTC+++
 	INIT_DELAYED_WORK(&usbnet_unlock_perf_delayed_work, usbnet_unlock_perf_delayed_work_fn);
+#ifdef CONFIG_PERFLOCK
+	perf_lock_init(&usbnet_perf_lock, PERF_LOCK_HIGHEST, "usbnet");
+#endif
 	pm_qos_add_request(&usbnet_req_freq, PM_QOS_CPU_FREQ_MIN, (s32)PM_QOS_CPU_FREQ_MIN_DEFAULT_VALUE);
 	pm_qos_add_request(&usbnet_req_cpus, PM_QOS_MIN_ONLINE_CPUS, (s32)PM_QOS_MIN_ONLINE_CPUS_DEFAULT_VALUE);
 	//HTC---

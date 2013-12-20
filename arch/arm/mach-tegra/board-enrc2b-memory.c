@@ -990,8 +990,10 @@ static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] =
 
 int enrc2b_emc_init(void)
 {
-	tegra_init_emc(enrc2b_emc_tables_h5tc2g_evt_533,
-		ARRAY_SIZE(enrc2b_emc_tables_h5tc2g_evt_533));
+	struct board_info board_info;
+
+		tegra_init_emc(enrc2b_emc_tables_h5tc2g_evt_533,
+			       ARRAY_SIZE(enrc2b_emc_tables_h5tc2g_evt_533));
 
 	return 0;
 }

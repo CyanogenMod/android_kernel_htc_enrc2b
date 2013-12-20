@@ -24,6 +24,7 @@
 #include "gpio-names.h"
 
 #define BB_XMM_OEM1
+#define pr_debug pr_info
 
 #define VENDOR_ID         0x1519
 #define PRODUCT_ID        0x0020
@@ -122,11 +123,11 @@ irqreturn_t baseband_xmm_power_ipc_ap_wake_irq(int irq, void *dev_id);
 void baseband_xmm_set_power_status(unsigned int status);
 extern struct xmm_power_data xmm_power_drv_data;
 
-int debug_gpio_dump(void);
+int debug_gpio_dump();
 int trigger_radio_fatal_get_coredump(char *reason);
 int trigger_silent_reset(char *reason);
 
-int Modem_is_6360(void);
-int Modem_is_6260(void);
+int Modem_is_6360();
+int Modem_is_6260();
 
 #endif  /* BASREBAND_XMM_POWER_H */

@@ -11,6 +11,7 @@
 #define RAM_DUMP_DONE		_IOW(CHARM_CODE, 6, int)
 #define WAIT_FOR_RESTART	_IOR(CHARM_CODE, 7, int)
 
+#define GET_FTRACE_CMD   	_IO(CHARM_CODE, 93)     /* HTC added */
 #define GET_MFG_MODE   	_IO(CHARM_CODE, 94)     /* HTC added */
 #define GET_RADIO_FLAG   	_IO(CHARM_CODE, 95)     /* HTC added */
 #define EFS_SYNC_TIMEOUT   _IO(CHARM_CODE, 96)     /* HTC added */

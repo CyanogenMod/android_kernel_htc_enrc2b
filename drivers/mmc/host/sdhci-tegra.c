@@ -927,7 +927,7 @@ static int tegra_sdhci_resume(struct sdhci_host *sdhci)
 	return 0;
 }
 
-static unsigned int tegra_sdhci_get_max_clock(struct sdhci_host *sdhci)
+static int tegra_sdhci_get_max_clock(struct sdhci_host *sdhci)
 {
 	if (sdhci->version >= SDHCI_SPEC_300)
 		return 255000000;
@@ -935,7 +935,7 @@ static unsigned int tegra_sdhci_get_max_clock(struct sdhci_host *sdhci)
 		return 63000000;
 }
 
-static unsigned int tegra_sdhci_get_min_clock(struct sdhci_host *sdhci)
+static int tegra_sdhci_get_min_clock(struct sdhci_host *sdhci)
 {
 	return 400000;
 }
@@ -1308,9 +1308,6 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 		mmc_bkops_alarm_handler);
         }
 
-	/* enable async suspend/resume to reduce LP0 latency */
-	device_enable_async_suspend(&pdev->dev);
-
 	return 0;
 
 err_add_host:
@@ -1419,6 +1416,7 @@ static int sdhci_pltfm_prepare(struct device *dev) {
 
 	struct platform_device *plt_dev = to_platform_device(dev);
 	struct sdhci_host *host = platform_get_drvdata(plt_dev);
+	int err;
 
 	if (host->mmc && host->mmc->card && host->mmc->card->type == MMC_TYPE_MMC) {
 		printk(KERN_INFO "mmc0: bkops_urgent_checking =%d\n", host->mmc->card->ext_csd.bkops_urgent_checking);
@@ -1450,7 +1448,7 @@ static int sdhci_pltfm_prepare(struct device *dev) {
 	return 0;
 }
 
-static void sdhci_pltfm_complete(struct device *dev) {
+static int sdhci_pltfm_complete(struct device *dev) {
 /*
 	struct platform_device *plt_dev = to_platform_device(dev);
 	struct sdhci_host *host = platform_get_drvdata(plt_dev);
@@ -1464,6 +1462,7 @@ static void sdhci_pltfm_complete(struct device *dev) {
 		}
 	}
 */
+	return 0;
 }
 
 static struct dev_pm_ops htc_mmc_pm_ops = {

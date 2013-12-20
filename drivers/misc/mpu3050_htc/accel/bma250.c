@@ -94,7 +94,7 @@ static int set_normal_mode(void *mlsl_handle,
                                 &data);
 
 	if(data == 0xf9){ // second source BMA250E chip id
-		I("Use BMA250E Solution");
+		printk("[GSNR]Use BMA250E Solution");
 		msleep(2);
 	}
 
@@ -381,6 +381,7 @@ static int bma250_suspend(void *mlsl_handle,
 			  struct ext_slave_descr *slave,
 			  struct ext_slave_platform_data *pdata)
 {
+	printk("[GSNR]bma250_suspend start\n");
 	int result = 0;
 	unsigned char ctrl_reg;
 	unsigned char int_reg;
@@ -389,8 +390,6 @@ static int bma250_suspend(void *mlsl_handle,
 	ctrl_reg = private_data->suspend.ctrl_reg;
 	int_reg = private_data->suspend.int_reg;
 
-	I("bma250_suspend start\n");
-	
 	private_data->state = 1;
 
 	/* TO DO sync from bma150 of MPL3.3.0, comment follows */
@@ -483,6 +482,7 @@ static int bma250_init(void *mlsl_handle,
 			  struct ext_slave_descr *slave,
 			  struct ext_slave_platform_data *pdata)
 {
+	printk(KERN_INFO "[GSNR]Gsensor enable\n");
 	tMLError result;
 	unsigned char reg = 0;
 	unsigned char bw_reg = 0;
@@ -494,7 +494,7 @@ static int bma250_init(void *mlsl_handle,
 	if (!private_data)
 		return ML_ERROR_MEMORY_EXAUSTED;
 
-	I("Gsensor enable\n");
+
 
 	pdata->private_data = private_data;
 
@@ -562,7 +562,7 @@ static int bma250_exit(void *mlsl_handle,
 			  struct ext_slave_descr *slave,
 			  struct ext_slave_platform_data *pdata)
 {
-	I("Gsensor disable\n");
+	printk(KERN_INFO "[GSNR]Gsensor disable\n");
 	if (pdata->private_data)
 		return MLOSFree(pdata->private_data);
 	else
@@ -675,7 +675,7 @@ static struct ext_slave_descr bma250_descr = {
 
 struct ext_slave_descr *bma250_get_slave_descr(void)
 {
-	I("G-sensor driver: init\n");
+	printk(KERN_INFO "[GSNR]G-sensor driver: init\n");
 	return &bma250_descr;
 }
 EXPORT_SYMBOL(bma250_get_slave_descr);

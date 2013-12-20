@@ -2,7 +2,6 @@
  * drivers/cpufreq/cpufreq_interactive.c
  *
  * Copyright (C) 2010 Google, Inc.
- * Copyright (c) 2012, NVIDIA CORPORATION.  All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -20,7 +19,6 @@
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
 #include <linux/cpufreq.h>
-#include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/tick.h>
@@ -30,7 +28,11 @@
 #include <linux/mutex.h>
 
 #include <asm/cputime.h>
+#include <linux/input.h>
+#include <linux/workqueue.h>
+#include <linux/slab.h>
 
+static atomic_t active_count = ATOMIC_INIT(0);
 
 struct cpufreq_interactive_cpuinfo {
 	struct timer_list cpu_timer;
@@ -52,24 +54,27 @@ struct cpufreq_interactive_cpuinfo {
 
 static DEFINE_PER_CPU(struct cpufreq_interactive_cpuinfo, cpuinfo);
 
-/* realtime thread handles frequency scaling */
-static struct task_struct *speedchange_task;
-static cpumask_t speedchange_cpumask;
-static spinlock_t speedchange_cpumask_lock;
+/* Workqueues handle frequency scaling */
+static struct task_struct *up_task;
+static struct workqueue_struct *down_wq;
+static struct work_struct freq_scale_down_work;
+static cpumask_t up_cpumask;
+static spinlock_t up_cpumask_lock;
+static cpumask_t down_cpumask;
+static spinlock_t down_cpumask_lock;
+static struct mutex set_speed_lock;
 
 /* Go to max speed when CPU load at or above this value. */
 #define DEFAULT_GO_MAXSPEED_LOAD 85
 static unsigned long go_maxspeed_load;
 
 /* Base of exponential raise to max speed; if 0 - jump to maximum */
-#define DEFAULT_BOOST_FACTOR 3
 static unsigned long boost_factor;
 
 /* Max frequency boost in Hz; if 0 - no max is enforced */
 static unsigned long max_boost;
 
 /* Consider IO as busy */
-#define DEFAULT_IO_IS_BUSY 1
 static unsigned long io_is_busy;
 
 /*
@@ -81,7 +86,7 @@ static unsigned long sustain_load;
 /*
  * The minimum amount of time to spend at a frequency before we can ramp down.
  */
-#define DEFAULT_MIN_SAMPLE_TIME 10000;
+#define DEFAULT_MIN_SAMPLE_TIME 80000;
 static unsigned long min_sample_time;
 
 /*
@@ -115,14 +120,6 @@ static unsigned long midrange_freq;
 static unsigned long midrange_go_maxspeed_load;
 static unsigned long midrange_max_boost;
 
-/*
- * gov_state_lock protects interactive node creation in governor start/stop.
- */
-static DEFINE_MUTEX(gov_state_lock);
-
-static struct mutex gov_state_lock;
-static unsigned int active_count;
-
 static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 		unsigned int event);
 
@@ -136,12 +133,109 @@ struct cpufreq_governor cpufreq_gov_interactive = {
 	.owner = THIS_MODULE,
 };
 
+static void dbs_refresh_callback(struct work_struct *unused)
+{
+	struct cpufreq_policy *policy;
+	struct cpufreq_interactive_cpuinfo *this_dbs_info;
+
+	if (lock_policy_rwsem_write(0) < 0)
+		return;
+
+	this_dbs_info = &per_cpu(cpuinfo, 0);
+	policy = this_dbs_info->policy;
+
+	if (policy && policy->cur < policy->max) {
+		__cpufreq_driver_target(policy, policy->max,
+				CPUFREQ_RELATION_L);
+		/*
+		this_dbs_info->prev_cpu_idle = get_cpu_idle_time(0,
+				&this_dbs_info->prev_cpu_wall);
+		*/
+	}
+	unlock_policy_rwsem_write(0);
+}
+
+static DECLARE_WORK(dbs_refresh_work, dbs_refresh_callback);
+
+static void dbs_input_event(struct input_handle *handle, unsigned int type,
+					unsigned int code, int value)
+{
+	schedule_work(&dbs_refresh_work);
+}
+
+static int input_dev_filter(const char* input_dev_name)
+{
+	int ret = 0;
+	if (strstr(input_dev_name, "touchscreen") ||
+		strstr(input_dev_name, "-keypad") ||
+		strstr(input_dev_name, "-nav") ||
+		strstr(input_dev_name, "-oj")) {
+	}
+	else {
+		ret = 1;
+	}
+	return ret;
+}
+
+static int dbs_input_connect(struct input_handler *handler,
+		struct input_dev *dev, const struct input_device_id *id)
+{
+	struct input_handle *handle;
+	int error;
+
+	/* filter out those input_dev that we don't care */
+	if (input_dev_filter(dev->name))
+		return 0;
+
+	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
+	if (!handle)
+		return -ENOMEM;
+
+	handle->dev = dev;
+	handle->handler = handler;
+	handle->name = "cpufreq";
+
+	error = input_register_handle(handle);
+	if (error)
+		goto err2;
+
+	error = input_open_device(handle);
+	if (error)
+		goto err1;
+
+	return 0;
+err1:
+	input_unregister_handle(handle);
+err2:
+	kfree(handle);
+	return error;
+}
+
+static void dbs_input_disconnect(struct input_handle *handle)
+{
+	input_close_device(handle);
+	input_unregister_handle(handle);
+	kfree(handle);
+}
+
+static const struct input_device_id dbs_ids[] = {
+	{ .driver_info = 1 },
+	{ },
+};
+static struct input_handler dbs_input_handler = {
+	.event          = dbs_input_event,
+	.connect        = dbs_input_connect,
+	.disconnect     = dbs_input_disconnect,
+	.name           = "cpufreq_ond",
+	.id_table       = dbs_ids,
+};
+
+
+
 static unsigned int cpufreq_interactive_get_target(
 	int cpu_load, int load_since_change, struct cpufreq_policy *policy)
 {
 	unsigned int target_freq;
-	unsigned int maxspeed_load = go_maxspeed_load;
-	unsigned int mboost = max_boost;
 
 	/*
 	 * Choose greater of short-term load (since last idle timer
@@ -151,19 +245,14 @@ static unsigned int cpufreq_interactive_get_target(
 	if (load_since_change > cpu_load)
 		cpu_load = load_since_change;
 
-	if (midrange_freq && policy->cur > midrange_freq) {
-		maxspeed_load = midrange_go_maxspeed_load;
-		mboost = midrange_max_boost;
-	}
-
-	if (cpu_load >= maxspeed_load) {
+	if (cpu_load >= go_maxspeed_load) {
 		if (!boost_factor)
 			return policy->max;
 
 		target_freq = policy->cur * boost_factor;
 
-		if (mboost && target_freq > policy->cur + mboost)
-			target_freq = policy->cur + mboost;
+		if (max_boost && target_freq > policy->cur + max_boost)
+			target_freq = policy->cur + max_boost;
 	}
 	else {
 		if (!sustain_load)
@@ -230,9 +319,10 @@ static void cpufreq_interactive_timer(unsigned long data)
 	if (!idle_exit_time)
 		goto exit;
 
-	delta_idle = (unsigned int)(now_idle - time_in_idle);
-	delta_iowait = (unsigned int)(now_iowait - time_in_iowait);
-	delta_time = (unsigned int)(pcpu->timer_run_time - idle_exit_time);
+	delta_idle = (unsigned int) cputime64_sub(now_idle, time_in_idle);
+	delta_iowait = (unsigned int) cputime64_sub(now_iowait, time_in_iowait);
+	delta_time = (unsigned int) cputime64_sub(pcpu->timer_run_time,
+						  idle_exit_time);
 
 	/*
 	 * If timer ran less than 1ms after short-term sample started, retry.
@@ -240,26 +330,32 @@ static void cpufreq_interactive_timer(unsigned long data)
 	if (delta_time < 1000)
 		goto rearm;
 
-	if (!io_is_busy)
-		delta_idle += delta_iowait;
-
 	if (delta_idle > delta_time)
 		cpu_load = 0;
-	else
+	else {
+		if (io_is_busy && delta_idle >= delta_iowait)
+			delta_idle -= delta_iowait;
+
 		cpu_load = 100 * (delta_time - delta_idle) / delta_time;
+	}
 
-	delta_idle = (unsigned int)(now_idle - pcpu->freq_change_time_in_idle);
-	delta_iowait = (unsigned int)(now_iowait - pcpu->freq_change_time_in_iowait);
-	delta_time = (unsigned int)(pcpu->timer_run_time - pcpu->freq_change_time);
-
-	if (!io_is_busy)
-		delta_idle += delta_iowait;
+	delta_idle = (unsigned int) cputime64_sub(now_idle,
+						pcpu->freq_change_time_in_idle);
+	delta_iowait = (unsigned int) cputime64_sub(now_iowait,
+					pcpu->freq_change_time_in_iowait);
+	delta_time = (unsigned int) cputime64_sub(pcpu->timer_run_time,
+						  pcpu->freq_change_time);
 
 	if ((delta_time == 0) || (delta_idle > delta_time))
 		load_since_change = 0;
-	else
+	else {
+		if (io_is_busy && delta_idle >= delta_iowait)
+			delta_idle -= delta_iowait;
+
 		load_since_change =
 			100 * (delta_time - delta_idle) / delta_time;
+	}
+
 	/*
 	 * Combine short-term load (since last idle timer started or timer
 	 * function re-armed itself) and long-term load (since last frequency
@@ -286,7 +382,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 	 * minimum sample time.
 	 */
 	if (new_freq < pcpu->target_freq) {
-		if (pcpu->timer_run_time - pcpu->freq_change_time
+		if (cputime64_sub(pcpu->timer_run_time, pcpu->freq_change_time)
 		    < min_sample_time)
 			goto rearm;
 	}
@@ -296,7 +392,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 	 * maximum allowed normal frequency
 	 */
 	if (max_normal_freq && (new_freq > max_normal_freq)) {
-		if ((pcpu->timer_run_time - pcpu->last_high_freq_time)
+		if (cputime64_sub(pcpu->timer_run_time, pcpu->last_high_freq_time)
 				< high_freq_min_delay) {
 			new_freq = max_normal_freq;
 		}
@@ -305,11 +401,19 @@ static void cpufreq_interactive_timer(unsigned long data)
 		}
 	}
 
-	pcpu->target_freq = new_freq;
-	spin_lock_irqsave(&speedchange_cpumask_lock, flags);
-	cpumask_set_cpu(data, &speedchange_cpumask);
-	spin_unlock_irqrestore(&speedchange_cpumask_lock, flags);
-	wake_up_process(speedchange_task);
+	if (new_freq < pcpu->target_freq) {
+		pcpu->target_freq = new_freq;
+		spin_lock_irqsave(&down_cpumask_lock, flags);
+		cpumask_set_cpu(data, &down_cpumask);
+		spin_unlock_irqrestore(&down_cpumask_lock, flags);
+		queue_work(down_wq, &freq_scale_down_work);
+	} else {
+		pcpu->target_freq = new_freq;
+		spin_lock_irqsave(&up_cpumask_lock, flags);
+		cpumask_set_cpu(data, &up_cpumask);
+		spin_unlock_irqrestore(&up_cpumask_lock, flags);
+		wake_up_process(up_task);
+	}
 
 rearm_if_notmax:
 	/*
@@ -407,9 +511,6 @@ static void cpufreq_interactive_idle_end(void)
 	struct cpufreq_interactive_cpuinfo *pcpu =
 		&per_cpu(cpuinfo, smp_processor_id());
 
-	if (!pcpu->governor_enabled)
-		return;
-
 	pcpu->idling = 0;
 	smp_wmb();
 
@@ -440,7 +541,7 @@ static void cpufreq_interactive_idle_end(void)
 
 }
 
-static int cpufreq_interactive_speedchange_task(void *data)
+static int cpufreq_interactive_up_task(void *data)
 {
 	unsigned int cpu;
 	cpumask_t tmp_mask;
@@ -449,23 +550,22 @@ static int cpufreq_interactive_speedchange_task(void *data)
 
 	while (1) {
 		set_current_state(TASK_INTERRUPTIBLE);
-		spin_lock_irqsave(&speedchange_cpumask_lock, flags);
+		spin_lock_irqsave(&up_cpumask_lock, flags);
 
-		if (cpumask_empty(&speedchange_cpumask)) {
-			spin_unlock_irqrestore(&speedchange_cpumask_lock,
-					       flags);
+		if (cpumask_empty(&up_cpumask)) {
+			spin_unlock_irqrestore(&up_cpumask_lock, flags);
 			schedule();
 
 			if (kthread_should_stop())
 				break;
 
-			spin_lock_irqsave(&speedchange_cpumask_lock, flags);
+			spin_lock_irqsave(&up_cpumask_lock, flags);
 		}
 
 		set_current_state(TASK_RUNNING);
-		tmp_mask = speedchange_cpumask;
-		cpumask_clear(&speedchange_cpumask);
-		spin_unlock_irqrestore(&speedchange_cpumask_lock, flags);
+		tmp_mask = up_cpumask;
+		cpumask_clear(&up_cpumask);
+		spin_unlock_irqrestore(&up_cpumask_lock, flags);
 
 		for_each_cpu(cpu, &tmp_mask) {
 			unsigned int j;
@@ -476,6 +576,8 @@ static int cpufreq_interactive_speedchange_task(void *data)
 
 			if (!pcpu->governor_enabled)
 				continue;
+
+			mutex_lock(&set_speed_lock);
 
 			for_each_cpu(j, pcpu->policy->cpus) {
 				struct cpufreq_interactive_cpuinfo *pjcpu =
@@ -488,6 +590,7 @@ static int cpufreq_interactive_speedchange_task(void *data)
 			__cpufreq_driver_target(pcpu->policy,
 						max_freq,
 						CPUFREQ_RELATION_H);
+			mutex_unlock(&set_speed_lock);
 
 			pcpu->freq_change_time_in_idle =
 				get_cpu_idle_time_us(cpu,
@@ -498,6 +601,50 @@ static int cpufreq_interactive_speedchange_task(void *data)
 	}
 
 	return 0;
+}
+
+static void cpufreq_interactive_freq_down(struct work_struct *work)
+{
+	unsigned int cpu;
+	cpumask_t tmp_mask;
+	unsigned long flags;
+	struct cpufreq_interactive_cpuinfo *pcpu;
+
+	spin_lock_irqsave(&down_cpumask_lock, flags);
+	tmp_mask = down_cpumask;
+	cpumask_clear(&down_cpumask);
+	spin_unlock_irqrestore(&down_cpumask_lock, flags);
+
+	for_each_cpu(cpu, &tmp_mask) {
+		unsigned int j;
+		unsigned int max_freq = 0;
+
+		pcpu = &per_cpu(cpuinfo, cpu);
+		smp_rmb();
+
+		if (!pcpu->governor_enabled)
+			continue;
+
+		mutex_lock(&set_speed_lock);
+
+		for_each_cpu(j, pcpu->policy->cpus) {
+			struct cpufreq_interactive_cpuinfo *pjcpu =
+				&per_cpu(cpuinfo, j);
+
+			if (pjcpu->target_freq > max_freq)
+				max_freq = pjcpu->target_freq;
+		}
+
+		__cpufreq_driver_target(pcpu->policy, max_freq,
+					CPUFREQ_RELATION_H);
+
+		mutex_unlock(&set_speed_lock);
+		pcpu->freq_change_time_in_idle =
+			get_cpu_idle_time_us(cpu,
+					     &pcpu->freq_change_time);
+		pcpu->freq_change_time_in_iowait =
+			get_cpu_iowait_time(cpu, NULL);
+	}
 }
 
 #define DECL_CPUFREQ_INTERACTIVE_ATTR(name) \
@@ -540,11 +687,8 @@ DECL_CPUFREQ_INTERACTIVE_ATTR(max_normal_freq)
 
 static struct attribute *interactive_attributes[] = {
 	&go_maxspeed_load_attr.attr,
-	&midrange_freq_attr.attr,
-	&midrange_go_maxspeed_load_attr.attr,
 	&boost_factor_attr.attr,
 	&max_boost_attr.attr,
-	&midrange_max_boost_attr.attr,
 	&io_is_busy_attr.attr,
 	&sustain_load_attr.attr,
 	&min_sample_time_attr.attr,
@@ -557,26 +701,6 @@ static struct attribute *interactive_attributes[] = {
 static struct attribute_group interactive_attr_group = {
 	.attrs = interactive_attributes,
 	.name = "interactive",
-};
-
-static int cpufreq_interactive_idle_notifier(struct notifier_block *nb,
-					     unsigned long val,
-					     void *data)
-{
-	switch (val) {
-	case IDLE_START:
-		cpufreq_interactive_idle_start();
-		break;
-	case IDLE_END:
-		cpufreq_interactive_idle_end();
-		break;
-	}
-
-	return 0;
-}
-
-static struct notifier_block cpufreq_interactive_idle_nb = {
-	.notifier_call = cpufreq_interactive_idle_notifier,
 };
 
 static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
@@ -618,24 +742,20 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 				mod_timer(&pcpu->cpu_timer, jiffies + 2);
 		}
 
-		mutex_lock(&gov_state_lock);
-		active_count++;
-
 		/*
 		 * Do not register the idle hook and create sysfs
 		 * entries if we have already done so.
 		 */
-		if (active_count == 1) {
-			rc = sysfs_create_group(cpufreq_global_kobject,
-					&interactive_attr_group);
+		if (atomic_inc_return(&active_count) > 1)
+			return 0;
 
-			if (rc) {
-				mutex_unlock(&gov_state_lock);
-				return rc;
-			}
-			idle_notifier_register(&cpufreq_interactive_idle_nb);
-		}
-		mutex_unlock(&gov_state_lock);
+		rc = sysfs_create_group(cpufreq_global_kobject,
+				&interactive_attr_group);
+		if (rc)
+			return rc;
+
+		if (!policy->cpu)
+			rc = input_register_handler(&dbs_input_handler);
 
 		break;
 
@@ -655,16 +775,15 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 			pcpu->idle_exit_time = 0;
 		}
 
-		mutex_lock(&gov_state_lock);
-		active_count--;
+		if (!policy->cpu)
+			input_unregister_handler(&dbs_input_handler);
 
-		if (active_count == 0) {
-			idle_notifier_unregister(&cpufreq_interactive_idle_nb);
+		flush_work(&freq_scale_down_work);
+		if (atomic_dec_return(&active_count) > 0)
+			return 0;
 
-			sysfs_remove_group(cpufreq_global_kobject,
-					&interactive_attr_group);
-		}
-		mutex_unlock(&gov_state_lock);
+		sysfs_remove_group(cpufreq_global_kobject,
+				&interactive_attr_group);
 
 		break;
 
@@ -675,18 +794,30 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 		else if (policy->min > policy->cur)
 			__cpufreq_driver_target(policy,
 					policy->min, CPUFREQ_RELATION_L);
-
-		/* reschedule the timer if we stopped it */
-		pcpu = &per_cpu(cpuinfo, policy->cpu);
-
-		if (pcpu && !timer_pending(&pcpu->cpu_timer))
-			mod_timer(&pcpu->cpu_timer,
-				jiffies + usecs_to_jiffies(timer_rate));
-
 		break;
 	}
 	return 0;
 }
+
+static int cpufreq_interactive_idle_notifier(struct notifier_block *nb,
+					     unsigned long val,
+					     void *data)
+{
+	switch (val) {
+	case IDLE_START:
+		cpufreq_interactive_idle_start();
+		break;
+	case IDLE_END:
+		cpufreq_interactive_idle_end();
+		break;
+	}
+
+	return 0;
+}
+
+static struct notifier_block cpufreq_interactive_idle_nb = {
+	.notifier_call = cpufreq_interactive_idle_notifier,
+};
 
 static int __init cpufreq_interactive_init(void)
 {
@@ -695,13 +826,10 @@ static int __init cpufreq_interactive_init(void)
 	struct sched_param param = { .sched_priority = MAX_RT_PRIO-1 };
 
 	go_maxspeed_load = DEFAULT_GO_MAXSPEED_LOAD;
-	midrange_go_maxspeed_load = DEFAULT_MID_RANGE_GO_MAXSPEED_LOAD;
 	min_sample_time = DEFAULT_MIN_SAMPLE_TIME;
 	timer_rate = DEFAULT_TIMER_RATE;
 	high_freq_min_delay = DEFAULT_HIGH_FREQ_MIN_DELAY;
 	max_normal_freq = DEFAULT_MAX_NORMAL_FREQ;
-    boost_factor = DEFAULT_BOOST_FACTOR;
-    io_is_busy = DEFAULT_IO_IS_BUSY;
 
 	/* Initalize per-cpu timers */
 	for_each_possible_cpu(i) {
@@ -711,20 +839,35 @@ static int __init cpufreq_interactive_init(void)
 		pcpu->cpu_timer.data = i;
 	}
 
-	spin_lock_init(&speedchange_cpumask_lock);
-	speedchange_task =
-		kthread_create(cpufreq_interactive_speedchange_task, NULL,
-			       "cfinteractive");
-	if (IS_ERR(speedchange_task))
-		return PTR_ERR(speedchange_task);
+	up_task = kthread_create(cpufreq_interactive_up_task, NULL,
+				 "kinteractiveup");
+	if (IS_ERR(up_task))
+		return PTR_ERR(up_task);
 
-	sched_setscheduler_nocheck(speedchange_task, SCHED_FIFO, &param);
-	get_task_struct(speedchange_task);
+	sched_setscheduler_nocheck(up_task, SCHED_FIFO, &param);
+	get_task_struct(up_task);
 
-	/* NB: wake up so the thread does not look hung to the freezer */
-	wake_up_process(speedchange_task);
+	/* No rescuer thread, bind to CPU queuing the work for possibly
+	   warm cache (probably doesn't matter much). */
+	down_wq = alloc_workqueue("knteractive_down", 0, 1);
+
+	if (!down_wq)
+		goto err_freeuptask;
+
+	INIT_WORK(&freq_scale_down_work,
+		  cpufreq_interactive_freq_down);
+
+	spin_lock_init(&up_cpumask_lock);
+	spin_lock_init(&down_cpumask_lock);
+	mutex_init(&set_speed_lock);
+
+	idle_notifier_register(&cpufreq_interactive_idle_nb);
 
 	return cpufreq_register_governor(&cpufreq_gov_interactive);
+
+err_freeuptask:
+	put_task_struct(up_task);
+	return -ENOMEM;
 }
 
 #ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE
@@ -736,8 +879,9 @@ module_init(cpufreq_interactive_init);
 static void __exit cpufreq_interactive_exit(void)
 {
 	cpufreq_unregister_governor(&cpufreq_gov_interactive);
-	kthread_stop(speedchange_task);
-	put_task_struct(speedchange_task);
+	kthread_stop(up_task);
+	put_task_struct(up_task);
+	destroy_workqueue(down_wq);
 }
 
 module_exit(cpufreq_interactive_exit);

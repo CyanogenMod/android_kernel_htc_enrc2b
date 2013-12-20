@@ -51,7 +51,6 @@
 #include "tegra_udc.h"
 
 #include <mach/htc_battery_common.h>
-#include "../../../arch/arm/mach-tegra/tegra_pmqos.h"
 
 #define VBUS_WAKEUP_ENR 19
 extern int global_wakeup_state;
@@ -104,9 +103,11 @@ static int reset_queues_mute(struct tegra_udc *udc);
 #define UTMIP_HS_SYNC_START_DLY(x)	(((x) & 0x1f) << 1)
 /* -- htc -- */
 
-static struct pm_qos_request_list boost_cpu_freq_req;
-static u32 ep_queue_request_count;
-static u8 boost_cpufreq_work_flag;
+#ifdef CONFIG_TEGRA_GADGET_BOOST_CPU_FREQ
+	static struct pm_qos_request_list boost_cpu_freq_req;
+	static u32 ep_queue_request_count;
+	static u8 boost_cpufreq_work_flag;
+#endif
 
 static inline void udc_writel(struct tegra_udc *udc, u32 val, u32 offset)
 {
@@ -210,12 +211,13 @@ static void done(struct tegra_ep *ep, struct tegra_req *req, int status)
 			req->req.actual, req->req.length);
 
 	ep->stopped = 1;
-
+#ifdef CONFIG_TEGRA_GADGET_BOOST_CPU_FREQ
 	if (req->req.complete && req->req.length >= BOOST_TRIGGER_SIZE) {
 		ep_queue_request_count--;
 		if (!ep_queue_request_count)
 			schedule_work(&udc->boost_cpufreq_work);
 	}
+#endif
 
 	/* complete() is from gadget layer,
 	 * eg fsg->bulk_in_complete() */
@@ -681,10 +683,10 @@ static int tegra_ep_disable(struct usb_ep *_ep)
 		next_td = ep->last_td;
 		for (j = 0; j < ep->last_dtd_count; j++) {
 			curr_td = next_td;
-			dma_pool_free(udc->td_pool, curr_td, curr_td->td_dma);
-			if (j != ep->last_dtd_count - 1) {
+			if (j != ep->last_dtd_count) {
 				next_td = curr_td->next_td_virt;
 			}
+			dma_pool_free(udc->td_pool, curr_td, curr_td->td_dma);
 		}
 	}
 	ep->last_td = 0;
@@ -908,6 +910,9 @@ tegra_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 	enum dma_data_direction dir;
 	int status;
 
+	if (udc->usb_state == USB_STATE_SUSPENDED)
+		return -ESHUTDOWN;
+
 	/* catch various bogus parameters */
 	if (!_req || !req->req.complete || !req->req.buf
 			|| !list_empty(&req->queue)) {
@@ -930,11 +935,13 @@ tegra_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 		}
 	}
 
+#ifdef CONFIG_TEGRA_GADGET_BOOST_CPU_FREQ
 	if (req->req.length >= BOOST_TRIGGER_SIZE) {
 		ep_queue_request_count++;
 		if (ep_queue_request_count && boost_cpufreq_work_flag)
 			schedule_work(&udc->boost_cpufreq_work);
 	}
+#endif
 
 	dir = ep_is_in(ep) ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
 
@@ -1379,13 +1386,26 @@ static int tegra_pullup(struct usb_gadget *gadget, int is_on)
 			OTG_STATE_B_PERIPHERAL)
 			return 0;
 
-	tmp = udc_readl(udc, USB_CMD_REG_OFFSET);
-	if (can_pullup(udc))
+	if (can_pullup(udc)) {
+		/* Enable DR irq reg */
+		tmp = USB_INTR_INT_EN | USB_INTR_ERR_INT_EN
+			| USB_INTR_PTC_DETECT_EN | USB_INTR_RESET_EN
+			| USB_INTR_DEVICE_SUSPEND | USB_INTR_SYS_ERR_EN;
+		udc_writel(udc, tmp, USB_INTR_REG_OFFSET);
+
+		/* set controller to Run  */
+		tmp = udc_readl(udc, USB_CMD_REG_OFFSET);
 		udc_writel(udc, tmp | USB_CMD_RUN_STOP,
 				USB_CMD_REG_OFFSET);
-	else
+	} else {
+		/* set controller to Stop */
+		tmp = udc_readl(udc, USB_CMD_REG_OFFSET);
 		udc_writel(udc, (tmp & ~USB_CMD_RUN_STOP),
 				USB_CMD_REG_OFFSET);
+
+		/* disable all INTR  */
+		udc_writel(udc, 0, USB_INTR_REG_OFFSET);
+	}
 
 	return 0;
 }
@@ -2172,11 +2192,12 @@ static void tegra_udc_set_current_limit_work(struct work_struct *work)
 	}
 }
 
+#ifdef CONFIG_TEGRA_GADGET_BOOST_CPU_FREQ
 static void tegra_udc_boost_cpu_frequency_work(struct work_struct *work)
 {
 	if (ep_queue_request_count && boost_cpufreq_work_flag) {
 		pm_qos_update_request(&boost_cpu_freq_req,
-			(s32)TEGRA_GADGET_CPU_FREQ_MIN);
+			(s32)CONFIG_TEGRA_GADGET_BOOST_CPU_FREQ * 1000);
 		boost_cpufreq_work_flag = 0;
 	} else if (!ep_queue_request_count && !boost_cpufreq_work_flag) {
 		pm_qos_update_request(&boost_cpu_freq_req,
@@ -2184,6 +2205,7 @@ static void tegra_udc_boost_cpu_frequency_work(struct work_struct *work)
 		boost_cpufreq_work_flag = 1;
 	}
 }
+#endif
 
 static void tegra_udc_irq_work(struct work_struct *irq_work)
 {
@@ -2252,6 +2274,15 @@ static irqreturn_t tegra_udc_irq(int irq, void *_udc)
 	irqreturn_t status = IRQ_NONE;
 	unsigned long flags;
 
+	/* somehow we got an IRQ while in the reset sequence: ignore it */
+	if (!udc->softconnect) {
+		USB_INFO("Warning: USB controller issue interrupt during disconnect\n");
+		irq_src = udc_readl(udc, USB_STS_REG_OFFSET) & udc_readl(udc, USB_INTR_REG_OFFSET);
+		/* Clear notification bits */
+		udc_writel(udc, irq_src, USB_STS_REG_OFFSET);
+		return IRQ_HANDLED;
+	}
+
 	spin_lock_irqsave(&udc->lock, flags);
 
 	if (!udc->transceiver) {
@@ -2264,17 +2295,16 @@ static irqreturn_t tegra_udc_irq(int irq, void *_udc)
 	}
 
 	/* Disable ISR for OTG host mode */
-	if (udc->stopped)
-		goto done;
+	if (udc->stopped) {
+		spin_unlock_irqrestore(&udc->lock, flags);
+		return status;
+	}
 
 	/* Fence read for coherency of AHB master intiated writes */
 	readb(IO_ADDRESS(IO_PPCS_PHYS + USB1_PREFETCH_ID));
 
 	irq_src = udc_readl(udc, USB_STS_REG_OFFSET) &
 				udc_readl(udc, USB_INTR_REG_OFFSET);
-
-	if (irq_src == 0)
-		goto done;
 
 	/* Clear notification bits */
 	udc_writel(udc, irq_src, USB_STS_REG_OFFSET);
@@ -2340,7 +2370,6 @@ static irqreturn_t tegra_udc_irq(int irq, void *_udc)
 	if (irq_src & (USB_STS_ERR | USB_STS_SYS_ERR))
 		VDBG("Error IRQ %x", irq_src);
 
-done:
 	spin_unlock_irqrestore(&udc->lock, flags);
 	return status;
 }
@@ -2389,11 +2418,13 @@ static int tegra_udc_start(struct usb_gadget_driver *driver,
 
 
 	/* Enable DR IRQ reg and Set usbcmd reg  Run bit */
-	dr_controller_run(udc);
-	udc->usb_state = USB_STATE_ATTACHED;
-	udc->ep0_state = WAIT_FOR_SETUP;
-	udc->ep0_dir = 0;
-	udc->vbus_active = vbus_enabled(udc);
+	if (!udc->transceiver) {
+		dr_controller_run(udc);
+		udc->usb_state = USB_STATE_ATTACHED;
+		udc->ep0_state = WAIT_FOR_SETUP;
+		udc->ep0_dir = 0;
+		udc->vbus_active = vbus_enabled(udc);
+	}
 
 	USB_INFO("%s: bind to driver %s\n",
 			udc->gadget.name, driver->driver.name);
@@ -2718,13 +2749,14 @@ static int __init tegra_udc_probe(struct platform_device *pdev)
 	err = usb_add_gadget_udc(&pdev->dev, &udc->gadget);
 	if (err)
 		goto err_del_udc;
-
+#ifdef CONFIG_TEGRA_GADGET_BOOST_CPU_FREQ
 	boost_cpufreq_work_flag = 1;
 	ep_queue_request_count = 0;
 	INIT_WORK(&udc->boost_cpufreq_work,
 					tegra_udc_boost_cpu_frequency_work);
 	pm_qos_add_request(&boost_cpu_freq_req, PM_QOS_CPU_FREQ_MIN,
 					PM_QOS_DEFAULT_VALUE);
+#endif
 
 	usb_prepare(udc);	/* htc */
 
@@ -2807,7 +2839,9 @@ static int __exit tegra_udc_remove(struct platform_device *pdev)
 	udc->done = &done;
 
 	cancel_delayed_work(&udc->work);
+#ifdef CONFIG_TEGRA_GADGET_BOOST_CPU_FREQ
 	cancel_work_sync(&udc->boost_cpufreq_work);
+#endif
 
 	if (udc->vbus_reg)
 		regulator_put(udc->vbus_reg);
@@ -2885,11 +2919,35 @@ static int tegra_udc_resume(struct platform_device *pdev)
 	return 0;
 }
 
+static void tegra_udc_shutdown(struct platform_device *pdev)
+{
+	struct tegra_udc *udc = platform_get_drvdata(pdev);
+	u32 tmp;
+	if (udc == NULL || udc->transceiver == NULL) {
+		return;
+	}
+	dev_info(&pdev->dev, "%s\n", __func__);
+
+	if (can_pullup(udc)) {
+		dev_info(&pdev->dev, "%s: pull down D+\n", __func__);
+		tmp = udc_readl(udc, USB_CMD_REG_OFFSET);
+		udc_writel(udc, (tmp & ~USB_CMD_RUN_STOP),
+				USB_CMD_REG_OFFSET);
+	}
+}
+
+void tegra_udc_set_phy_clk(bool pull_up)
+{
+	struct tegra_udc *udc = the_udc;
+	tegra_usb_set_usb_clk(udc->phy, pull_up);
+}
+
 
 static struct platform_driver tegra_udc_driver = {
 	.remove  = __exit_p(tegra_udc_remove),
 	.suspend = tegra_udc_suspend,
 	.resume  = tegra_udc_resume,
+	.shutdown = tegra_udc_shutdown,
 	.driver  = {
 		.name = (char *)driver_name,
 		.owner = THIS_MODULE,

@@ -70,7 +70,6 @@
 #include <mach/tegra-bb-power.h>
 #include <mach/htc_bdaddress.h>
 #include <mach/htc_util.h>
-#include <mach/mfootprint.h>
 #include "board.h"
 #include "clock.h"
 #include "board-evitareul.h"
@@ -757,7 +756,6 @@ static struct platform_device tegra_rawchip_device = {
 
 /* HTC_HEADSET_GPIO Driver */
 static struct htc_headset_gpio_platform_data htc_headset_gpio_data = {
-	.eng_cfg		= 0,
 	.hpin_gpio		= TEGRA_GPIO_PW2,
 	.key_gpio		= TEGRA_GPIO_PBB6,
 	.key_enable_gpio	= 0,
@@ -774,7 +772,6 @@ static struct platform_device htc_headset_gpio = {
 
 /* HTC_HEADSET_MICROP Driver */
 static struct htc_headset_microp_platform_data htc_headset_microp_data = {
-	.eng_cfg			= 0,
 	.remote_int		= 1 << 13,
 //	.remote_irq		= TEGRA_uP_TO_INT(13),
 	.remote_enable_pin	= 0,
@@ -792,10 +789,10 @@ static struct platform_device htc_headset_microp = {
 
 /* HTC_HEADSET_PMIC Driver */
 static struct htc_headset_pmic_platform_data htc_headset_pmic_data_xe = {
-	.eng_cfg		= 0,
-	.driver_flag	= DRIVER_HS_PMIC_RPC_KEY,
-	.adc_mic_bias	= {HS_DEF_MIC_ADC_12_BIT_MIN,
-				   HS_DEF_MIC_ADC_12_BIT_MAX},
+	.driver_flag	= DRIVER_HS_PMIC_ADC,
+	.adc_mic_bias	= {HS_DEF_MIC_ADC_16_BIT_MIN,
+				   HS_DEF_MIC_ADC_16_BIT_MAX},
+	.adc_channel	= 4,
 	.adc_remote	= {0, 164, 165, 379, 380, 830},
 };
 
@@ -870,8 +867,8 @@ static struct platform_device htc_headset_one_wire = {
 /* HTC_HEADSET_MGR Driver */
 static struct platform_device *headset_devices_xe[] = {
 	&htc_headset_pmic_xe,
-	&htc_headset_gpio,
 	&htc_headset_one_wire,
+	&htc_headset_gpio,
 };
 
 static void uart_tx_gpo(int mode)
@@ -912,11 +909,9 @@ static void headset_init(void)
 }
 
 static struct htc_headset_mgr_platform_data htc_headset_mgr_data_xe = {
-	.eng_cfg				= 0,
 	.driver_flag		= DRIVER_HS_MGR_FLOAT_DET,
 	.headset_devices_num	= ARRAY_SIZE(headset_devices_xe),
 	.headset_devices	= headset_devices_xe,
-	.enable_1wire			= 0,
 	.headset_config_num	= ARRAY_SIZE(htc_headset_mgr_config_xe),
 	.headset_config		= htc_headset_mgr_config_xe,
 	.headset_init		= headset_init,
@@ -2269,6 +2264,7 @@ static void evitareul_baseband_init(void)
 
 static void __init evitareul_init(void)
 {
+	int rc = 0;
 	struct kobject *properties_kobj;
 
 	tegra_thermal_init(&thermal_data,
@@ -2283,8 +2279,10 @@ static void __init evitareul_init(void)
 	bt_export_bd_address();
 
 	platform_add_devices(evitareul_devices, ARRAY_SIZE(evitareul_devices));
-	if (board_mfg_mode() != BOARD_MFG_MODE_OFFMODE_CHARGING)
-		platform_device_register(&htc_headset_mgr_xe);
+	platform_device_register(&htc_headset_mgr_xe);
+#if defined(CONFIG_HTC_FIQ_DUMPER)
+	fiq_dumper_init();
+#endif
 #if defined(CONFIG_MEMORY_FOOTPRINT_DEBUGGING)
 	htc_memory_footprint_init();
 #endif
@@ -2310,7 +2308,25 @@ static void __init evitareul_init(void)
 		printk(KERN_WARNING "[KEY]%s: register reset key fail\n", __func__);
         properties_kobj = kobject_create_and_add("board_properties", NULL);
 	if (properties_kobj) {
-		sysfs_create_group(properties_kobj, &Aproj_properties_attr_group_XC);
+		rc = sysfs_create_group(properties_kobj, &Aproj_properties_attr_group_XC);
+		if (!rc) {
+			if((engineer_id & 0x03) == 1) {
+				for (rc = 0; rc < ARRAY_SIZE(edge_ts_3k_data_7070); rc++) {
+					edge_ts_3k_data_7070[rc].vk_obj = properties_kobj;
+					edge_ts_3k_data_7070[rc].vk2Use = &Aproj_virtual_keys_attr_XC;
+				}
+			} else if((engineer_id & 0x03) == 2) {
+				for (rc = 0; rc < ARRAY_SIZE(edge_ts_3k_data_3030); rc++) {
+					edge_ts_3k_data_3030[rc].vk_obj = properties_kobj;
+					edge_ts_3k_data_3030[rc].vk2Use = &Aproj_virtual_keys_attr_XC;
+				}
+			} else {
+				for (rc = 0; rc < ARRAY_SIZE(edge_ts_3k_data_3030); rc++) {
+					edge_ts_3k_data_3030[rc].vk_obj = properties_kobj;
+					edge_ts_3k_data_3030[rc].vk2Use = &Aproj_virtual_keys_attr_XC;
+				}
+			}
+		}
 	}
 	evitareul_cam_init();
 	evitareul_suspend_init();
@@ -2328,22 +2344,29 @@ static void __init evitareul_init(void)
 	if (!proc)
 		printk(KERN_ERR"Create /proc/dying_processes FAILED!\n");
 
-	if (!!(get_kernel_flag() & KERNEL_FLAG_PM_MONITOR) && board_mfg_mode() != BOARD_MFG_MODE_OFFMODE_CHARGING) {
-		htc_monitor_init();
-		htc_pm_monitor_init();
-	}
+	if (board_mfg_mode() != BOARD_MFG_MODE_OFFMODE_CHARGING)
+#if ! defined(CONFIG_HTC_PERFORMANCE_MONITOR_ALWAYS_ON)
+		if (get_kernel_flag() & KERNEL_FLAG_PM_MONITOR)
+#endif
+		{
+			htc_monitor_init();
+			htc_pm_monitor_init();
+		}
 }
 
 static void __init evitareul_reserve(void)
 {
 #if defined(CONFIG_NVMAP_CONVERT_CARVEOUT_TO_IOVMM)
-	tegra_reserve(0, SZ_4M, SZ_8M);
+	tegra_reserve(0, SZ_4M, 0);
 #else
 	tegra_reserve(SZ_128M, SZ_4M, SZ_8M);
 #endif
 	tegra_ram_console_debug_reserve(SZ_1M);
 #if defined(CONFIG_MEMORY_FOOTPRINT_DEBUGGING)
 	htc_memory_footprint_space_reserve(SZ_4K);
+#endif
+#if defined(CONFIG_HTC_FIQ_DUMPER)
+	fiq_dumper_space_reserve(SZ_4K);
 #endif
 }
 

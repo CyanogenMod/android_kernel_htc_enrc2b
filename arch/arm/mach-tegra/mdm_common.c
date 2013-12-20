@@ -40,6 +40,7 @@
 //#include "msm_watchdog.h"
 #include <linux/interrupt.h>
 #include "mdm_private.h"
+#include "sysmon.h"
 #include "gpio-names.h"
 
 //++SSD_RIL:20120724:For function get_radio_flag()
@@ -49,9 +50,6 @@
 //++SSD_RIL
 extern bool device_ehci_shutdown;
 //--SSD_RIL
-
-
-extern int open_hsicctl_timeout_trigger_errfatal;
 
 
 /* HTC added start */
@@ -85,6 +83,13 @@ bool mdm_is_alive = false;
 //++HTC
 static int mdm2ap_gpio_status = 0;
 static DEFINE_MUTEX(MDM_BOOT_STATUS_CHECK_LOCK);
+//--HTC
+
+//++HTC
+#define ENABLE_RAMDUMP_BACKUP_INVALID	(-1)
+static int enable_ramdumps_backup = ENABLE_RAMDUMP_BACKUP_INVALID;
+extern int get_enable_ramdumps();
+extern void set_enable_ramdumps(int en);
 //--HTC
 
 int mdm_common_check_final_efs_wait()
@@ -151,9 +156,12 @@ void mdm_common_enable_irq( struct mdm_modem_drv *mdm_drv, int enable )
 
 #define MDM_MODEM_TIMEOUT	6000
 #define MDM_MODEM_DELTA	100
+#define MDM_BOOT_TIMEOUT	60000L
+#define MDM_RDUMP_TIMEOUT	180000L
 
 static int mdm_debug_on;
 static struct workqueue_struct *mdm_queue;
+static struct workqueue_struct *mdm_sfr_queue;
 
 #define EXTERNAL_MODEM "external_modem"
 
@@ -167,7 +175,168 @@ DECLARE_COMPLETION(port_released);
 static int need_release_port;
 /* HTC added end*/
 
+/*++SSD_RIL@20121220: For store modem reset information*/
+#define RD_BUF_SIZE			100
+
+#define MODEM_ERRMSG_LIST_LEN 10
+
+struct mdm_msr_info {
+	int valid;
+	struct timespec msr_time;
+	char modem_errmsg[RD_BUF_SIZE];
+};
+int mdm_msr_index = 0;
+static struct mdm_msr_info msr_info_list[MODEM_ERRMSG_LIST_LEN];
+/*--SSD_RIL@20121220*/
+
+//++SSD Kris Chen
+DECLARE_COMPLETION(ftrace_cmd_can_be_executed);
+DECLARE_COMPLETION(ftrace_cmd_pending);
+static struct workqueue_struct *ftrace_queue = NULL;
+static char ftrace_cmd[256];
+static DEFINE_MUTEX(ftrace_cmd_lock);
+static int ftrace_sched_event_on = 0;
+
+static void execute_ftrace_cmd(char* cmd)
+{
+	int ret;
+
+	if ( get_radio_flag() == 0 )
+		return;
+
+	//wait until ftrace cmd can be executed
+	ret = wait_for_completion_interruptible(&ftrace_cmd_can_be_executed);
+	INIT_COMPLETION(ftrace_cmd_can_be_executed);
+	if (!ret) {
+		//copy cmd to ftrace_cmd buffer
+		mutex_lock(&ftrace_cmd_lock);
+		memset(ftrace_cmd, 0, sizeof(ftrace_cmd));
+		strcpy(ftrace_cmd, cmd);
+		pr_info("%s(%s)\n", __func__, ftrace_cmd);
+		mutex_unlock(&ftrace_cmd_lock);
+
+		//signal the waiting thread there is pending cmd
+		complete(&ftrace_cmd_pending);
+	}
+}
+
+static void ftrace_enable_basic_log_fn(struct work_struct *work)
+{
+	pr_info("%s+\n", __func__);
+	execute_ftrace_cmd("echo 8192 > /sys/kernel/debug/tracing/buffer_size_kb");
+	execute_ftrace_cmd("echo 1 > /sys/kernel/debug/tracing/tracing_on");
+	pr_info("%s-\n", __func__);
+}
+static DECLARE_WORK(ftrace_enable_basic_log_work, ftrace_enable_basic_log_fn);
+
+static void ftrace_enable_sched_log_fn(struct work_struct *work)
+{
+	pr_info("%s+\n", __func__);
+	if (ftrace_sched_event_on){
+		execute_ftrace_cmd("echo 16384 > /sys/kernel/debug/tracing/buffer_size_kb");
+		execute_ftrace_cmd("echo 1 > /sys/kernel/debug/tracing/events/sched/enable");
+	}
+	else {
+		execute_ftrace_cmd("echo 8 > /sys/kernel/debug/tracing/buffer_size_kb");
+		execute_ftrace_cmd("echo 0 > /sys/kernel/debug/tracing/events/sched/enable");
+	}
+	execute_ftrace_cmd("echo 1 > /sys/kernel/debug/tracing/tracing_on");
+	pr_info("%s-\n", __func__);
+}
+static DECLARE_WORK(ftrace_enable_sched_log_work, ftrace_enable_sched_log_fn);
+
+void ftrace_enable_sched_event(int on)
+{
+	ftrace_sched_event_on = on;
+	if (ftrace_queue) {
+		queue_work(ftrace_queue, &ftrace_enable_sched_log_work);
+	}
+}
+//--SSD Kris Chen
+
+
+/*++SSD_RIL@20121220: For store modem reset information*/
+static ssize_t modem_silent_reset_info_store(struct device *dev,
+		struct device_attribute *attr,	const char *buf, size_t count)
+{
+	return -EPERM;
+}
+
+static ssize_t modem_silent_reset_info_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int i = 0;
+	char tmp[RD_BUF_SIZE+30];
+
+	for( i=0; i<MODEM_ERRMSG_LIST_LEN; i++ ) {
+		if( msr_info_list[i].valid != 0 ) {
+			//Copy errmsg to buf
+			snprintf(tmp, RD_BUF_SIZE+30, "%ld-%s|\n\r", msr_info_list[i].msr_time.tv_sec, msr_info_list[i].modem_errmsg);
+			strcat(buf, tmp);
+			memset(tmp, 0, RD_BUF_SIZE+30);
+		}
+		msr_info_list[i].valid = 0;
+		memset(msr_info_list[i].modem_errmsg, 0, RD_BUF_SIZE);
+	}
+	strcat(buf, "\n\r\0");
+
+	return strlen(buf);
+}
+static DEVICE_ATTR(msr_info, S_IRUSR | S_IROTH | S_IRGRP,
+	modem_silent_reset_info_show, modem_silent_reset_info_store);
+
+static int modem_silent_reset_info_sysfs_attrs(struct platform_device *pdev)
+{
+	int i = 0;
+	mdm_msr_index = 0;
+	for( i=0; i<MODEM_ERRMSG_LIST_LEN; i++ ) {
+		msr_info_list[i].valid = 0;
+		memset(msr_info_list[i].modem_errmsg, 0, RD_BUF_SIZE);
+	}
+
+	return device_create_file(&pdev->dev, &dev_attr_msr_info);
+}
+/*--SSD_RIL@20121220*/
+
 static int first_boot = 1;
+
+#define RD_BUF_SIZE			100
+#define SFR_MAX_RETRIES		10
+#define SFR_RETRY_INTERVAL	1000
+
+static void mdm_restart_reason_fn(struct work_struct *work)
+{
+	int ret, ntries = 0;
+	char sfr_buf[RD_BUF_SIZE];
+
+	do {
+		msleep(SFR_RETRY_INTERVAL);
+		ret = sysmon_get_reason(SYSMON_SS_EXT_MODEM,
+					sfr_buf, sizeof(sfr_buf));
+		if (ret) {
+			/*
+			 * The sysmon device may not have been probed as yet
+			 * after the restart.
+			 */
+			pr_err("%s: Error retrieving mdm restart reason, ret = %d, "
+					"%d/%d tries\n", __func__, ret,
+					ntries + 1,	SFR_MAX_RETRIES);
+		} else {
+			pr_err("mdm restart reason: %s\n", sfr_buf);
+/*++SSD_RIL@20121220: For store modem reset information*/
+			msr_info_list[mdm_msr_index].valid = 1;
+			msr_info_list[mdm_msr_index].msr_time = current_kernel_time();
+			snprintf(msr_info_list[mdm_msr_index].modem_errmsg, RD_BUF_SIZE, "%s", sfr_buf);
+			if(++mdm_msr_index >= MODEM_ERRMSG_LIST_LEN) {
+				mdm_msr_index = 0;
+			}
+/*--SSD_RIL@20121220*/
+			break;
+		}
+	} while (++ntries < SFR_MAX_RETRIES);
+}
+
+static DECLARE_WORK(sfr_reason_work, mdm_restart_reason_fn);
 
 int err_radio;
 
@@ -337,6 +506,17 @@ long mdm_modem_ioctl(struct file *filp, unsigned int cmd,
 			complete(&mdm_boot);
 		else
 			first_boot = 0;
+
+		//enable ftrace log if radio flag 1 is set
+		if  (get_radio_flag() & 0x1) {
+			static bool is_enable = false;
+			if (!is_enable) {
+				is_enable = true;
+				if (ftrace_queue) {
+					queue_work(ftrace_queue, &ftrace_enable_basic_log_work);
+				}
+			}
+		}
 	}
 		break;
 	case RAM_DUMP_DONE:
@@ -360,6 +540,23 @@ long mdm_modem_ioctl(struct file *filp, unsigned int cmd,
 		INIT_COMPLETION(mdm_needs_reload);
 		break;
 /* HTC added start */
+	case GET_FTRACE_CMD:
+		{
+			// execute ftrace cmd only when radio flag is non-zero
+			if ( get_radio_flag() != 0 ) {
+				complete(&ftrace_cmd_can_be_executed);
+
+				ret = wait_for_completion_interruptible(&ftrace_cmd_pending);
+				if (!ret) {
+					mutex_lock(&ftrace_cmd_lock);
+					pr_info("ioctl GET_FTRACE_CMD: %s\n", ftrace_cmd);
+					copy_to_user((void __user *)arg, ftrace_cmd, sizeof(ftrace_cmd));
+					mutex_unlock(&ftrace_cmd_lock);
+				}
+				INIT_COMPLETION(ftrace_cmd_pending);
+			}
+			break;
+		}
 	case GET_MFG_MODE:
 		pr_info("%s: board_mfg_mode()=%d\n", __func__, board_mfg_mode());
 		put_user(board_mfg_mode(),
@@ -501,6 +698,9 @@ static void mdm_status_fn(struct work_struct *work)
 	pr_debug("%s: status:%d\n", __func__, value);
 
 	if ((value == 0) && mdm_drv->mdm_ready && !device_ehci_shutdown) {
+		//++SSD_RIL: set mdm_drv->mdm_ready before restart modem
+		mdm_drv->mdm_ready = 0;
+		//--SSD_RIL
 		pr_info("%s: unexpected reset external modem\n", __func__);
 		/* HTC added start */
 		dump_mdm_related_gpio();
@@ -572,7 +772,13 @@ static void mdm_disable_irqs(void)
 
 static irqreturn_t mdm_errfatal(int irq, void *dev_id)
 {
+	extern unsigned int HTC_HSIC_PHY_FOOTPRINT;	//HTC
+
 	pr_debug("%s: mdm got errfatal interrupt\n", __func__);
+
+	#ifdef HTC_DEBUG_USB_PHY_POWER_ON_STUCK
+	pr_info("HTC_HSIC_PHY_FOOTPRINT(%d)\n", HTC_HSIC_PHY_FOOTPRINT);	//HTC
+	#endif //HTC_DEBUG_USB_PHY_POWER_ON_STUCK
 
 	if ( get_radio_flag() & 0x0001 ) {
 		trace_printk("%s: mdm got errfatal interrupt\n", __func__);
@@ -581,6 +787,10 @@ static irqreturn_t mdm_errfatal(int irq, void *dev_id)
 
 	if (mdm_drv->mdm_ready &&
 		(gpio_get_value(mdm_drv->mdm2ap_status_gpio) == 1) && !device_ehci_shutdown) {
+
+		//++SSD_RIL: set mdm_drv->mdm_ready before restart modem
+		mdm_drv->mdm_ready = 0;
+		//--SSD_RIL
 
 		//HTC_Kris+++
 		mdm_in_fatal_handler = true;
@@ -705,11 +915,25 @@ static int mdm_subsys_powerup(const struct subsys_data *crashed_subsys)
 	//mdm_drv->ops->power_on_mdm_cb(mdm_drv);
 	mdm_drv->boot_type = CHARM_NORMAL_BOOT;
 	complete(&mdm_needs_reload);
-	wait_for_completion(&mdm_boot);
-	pr_info("%s: mdm modem has been restarted\n", __func__);
-	INIT_COMPLETION(mdm_boot);
+	if (!wait_for_completion_timeout(&mdm_boot,
+			msecs_to_jiffies(MDM_BOOT_TIMEOUT))) {
+		mdm_drv->mdm_boot_status = -ETIMEDOUT;
+		pr_info("%s: mdm modem restart timed out.\n", __func__);
+	} else {
+		pr_info("%s: mdm modem has been restarted\n", __func__);
+		/* Log the reason for the restart */
+		queue_work_on(0, mdm_sfr_queue, &sfr_reason_work);	/* HTC changed */
 
-	open_hsicctl_timeout_trigger_errfatal = 0;
+		//++HTC
+		/* Restore enable_ramdumps */
+		if (enable_ramdumps_backup != ENABLE_RAMDUMP_BACKUP_INVALID) {
+			pr_info("%s restore enable_ramdumps_backup:%d\n", __func__, enable_ramdumps_backup);
+			set_enable_ramdumps(enable_ramdumps_backup);
+			enable_ramdumps_backup = ENABLE_RAMDUMP_BACKUP_INVALID;
+		}
+		//--HTC
+	}
+	INIT_COMPLETION(mdm_boot);
 
 	//++HTC
 	mdm_in_fatal_handler = false;
@@ -852,6 +1076,10 @@ static void mdm_modem_initialize_data(struct platform_device  *pdev,
 		mdm_drv->v_dcin_modem_en_gpio = pres->start;
 //--SSD_RIL
 
+/*++SSD_RIL@20121220: For store modem reset information*/
+	modem_silent_reset_info_sysfs_attrs(pdev);
+/*--SSD_RIL@20121220*/
+
 	mdm_drv->boot_type                  = CHARM_NORMAL_BOOT;
 
 	mdm_drv->ops      = mdm_ops;
@@ -972,6 +1200,25 @@ int mdm_common_create(struct platform_device  *pdev,
 
 	mdm_queue = create_singlethread_workqueue("mdm_queue");
 	if (!mdm_queue) {
+		pr_err("%s: could not create workqueue. All mdm "
+				"functionality will be disabled\n",
+			__func__);
+		ret = -ENOMEM;
+		goto fatal_err;
+	}
+
+	mdm_sfr_queue = alloc_workqueue("mdm_sfr_queue", 0, 0);
+	if (!mdm_sfr_queue) {
+		pr_err("%s: could not create workqueue mdm_sfr_queue."
+			" All mdm functionality will be disabled\n",
+			__func__);
+		ret = -ENOMEM;
+		destroy_workqueue(mdm_queue);
+		goto fatal_err;
+	}
+
+	ftrace_queue = create_singlethread_workqueue("ftrace_queue");
+	if (!ftrace_queue) {
 		pr_err("%s: could not create workqueue. All mdm "
 				"functionality will be disabled\n",
 			__func__);
@@ -1248,3 +1495,18 @@ void trigger_ap2mdm_errfatal(void)
 	pr_info("%s-\n", __func__);
 }
 EXPORT_SYMBOL_GPL(trigger_ap2mdm_errfatal);
+
+void trigger_mdm_silent_reset(void)
+{
+	pr_info("%s+\n", __func__);
+
+	/* Force Disable ramdummp */
+	enable_ramdumps_backup = get_enable_ramdumps();
+	pr_info("%s enable_ramdumps_backup:%d\n", __func__, enable_ramdumps_backup);
+	set_enable_ramdumps(0);
+
+	trigger_ap2mdm_errfatal();
+
+	pr_info("%s-\n", __func__);
+}
+EXPORT_SYMBOL_GPL(trigger_mdm_silent_reset);

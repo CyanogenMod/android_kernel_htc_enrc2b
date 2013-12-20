@@ -45,6 +45,7 @@
 /* HTC_CSP_START */
 #include <linux/ioprio.h>
 #include <mach/board_htc.h>
+#include <mach/mfootprint.h>
 /* HTC_CSP_END */
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
@@ -693,10 +694,6 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 /* HTC_CSP_START */
     char eventmask[WL_EVENTING_MASK_LEN];
     int ret = 0;
-    
-    if (is_screen_off == value)
-    	return ret;
-    	
     is_screen_off = value;
 /* HTC_CSP_END */
 
@@ -889,10 +886,12 @@ int dhdhtc_update_wifi_power_mode(int is_screen_off)
 		pm_type = PM_FAST;
 		dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&pm_type, sizeof(pm_type), TRUE, 0);
 	} else {
+		/*
 		if (is_screen_off && !dhdcdc_wifiLock)
 			pm_type = PM_MAX;
 		else
-			pm_type = PM_FAST;
+		*/
+		pm_type = PM_FAST;
 		printf("update pm: %s, wifiLock: %d\n", pm_type==1?"PM_MAX":"PM_FAST", dhdcdc_wifiLock);
 		dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&pm_type, sizeof(pm_type), TRUE, 0);
 	}
@@ -975,10 +974,13 @@ static void dhd_early_suspend(struct early_suspend *h)
 {
 	struct dhd_info *dhd = container_of(h, struct dhd_info, early_suspend);
 
+	MF_DEBUG("00220000");
 	DHD_TRACE(("%s: enter\n", __FUNCTION__));
 
+	MF_DEBUG("00220001");
 	if (dhd)
 		dhd_suspend_resume_helper(dhd, 1, 0);
+	MF_DEBUG("00220002");
 }
 
 static void dhd_late_resume(struct early_suspend *h)
@@ -3488,6 +3490,7 @@ dhd_change_nvram_path(void)
 	}
 return 0;
 }
+extern bool wifi_isEvitarel;
 /*HTC_CSP_END*/
 
 dhd_pub_t *
@@ -3514,6 +3517,10 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 				strcpy(fw_path, fwb2_path);
 		}
 	}
+	/*HTC_CSP_START*/
+	if (wifi_isEvitarel)
+		dhd_change_nvram_path();
+	/*HTC_CPS_END*/
 	if (strlen(nvram_path) != 0) {
 		strncpy(nv_path, nvram_path, sizeof(nv_path) -1);
 		nv_path[sizeof(nv_path) -1] = '\0';
@@ -3973,6 +3980,11 @@ dhd_concurrent_fw(dhd_pub_t *dhd)
 #endif /* WL_ENABLE_P2P_IF */
 }
 #endif 
+
+/* HTC_WIFI_START*/
+extern int get_tamper_sf(void);
+/* HTC_WIFI_END */
+
 int
 dhd_preinit_ioctls(dhd_pub_t *dhd)
 {
@@ -3987,7 +3999,7 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	uint32 dongle_align = DHD_SDALIGN;
 	uint32 glom = CUSTOM_GLOM_SETTING;
 	uint32 txlazydelay = 0;
-	uint32 lvtrigtime = 250;
+	//uint32 lvtrigtime = 6;
 #if defined(VSDB) || defined(ROAM_ENABLE)
 	uint bcn_timeout = 8;
 #else
@@ -4163,11 +4175,16 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 #endif
 	}
 
-	DHD_ERROR(("Firmware up: op_mode=%d, "
+	/* only print out mac addr when S-off */
+	if (get_tamper_sf() == 0)
+		DHD_ERROR(("Firmware up: op_mode=%d, "
 			"Broadcom Dongle Host Driver mac=%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",
 			dhd->op_mode,
 			dhd->mac.octet[0], dhd->mac.octet[1], dhd->mac.octet[2],
 			dhd->mac.octet[3], dhd->mac.octet[4], dhd->mac.octet[5]));
+	else
+		DHD_ERROR(("Firmware up: op_mode=%d, Broadcom Dongle Host Driver\n",
+			dhd->op_mode));
 
 	/* Set Country code  */
 	if (dhd->dhd_cspec.ccode[0] != 0) {
@@ -4220,9 +4237,11 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 	bcm_mkiovar("bus:txlazydelay", (char *)&txlazydelay, 4, iovbuf, sizeof(iovbuf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
 
+#if 0
 	/* change lvtrigtime to 6 */
 	bcm_mkiovar("bus:lvtrigtime", (char *)&lvtrigtime, 4, iovbuf, sizeof(iovbuf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+#endif
 
 	/* Setup timeout if Beacons are lost and roam is off to report link down */
 	bcm_mkiovar("bcn_timeout", (char *)&bcn_timeout, 4, iovbuf, sizeof(iovbuf));
@@ -4374,6 +4393,9 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 	//setbit(eventmask, WLC_E_ASSOCREQ_IE);
 /* HTC_CSP_START */
 	setbit(eventmask, WLC_E_LOAD_IND);
+#if defined(HTC_TX_TRACKING)
+	setbit(eventmask, WLC_E_TX_STAT_ERROR);
+#endif
 /* HTC_CSP_END */
 #ifdef WL_CFG80211
 	setbit(eventmask, WLC_E_ESCAN_RESULT);
@@ -4486,6 +4508,29 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 	ret = 1;
 	bcm_mkiovar("tc_enable", (char *)&ret, 4, iovbuf, sizeof(iovbuf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+//HTC_CSP_START
+#if defined(HTC_TX_TRACKING)
+{
+		/* tx stat check, if (txerr/(txframe+txerr) > tx_stat_chk_ratio, send up event */
+		uint tx_stat_chk = 0; /* disable tx status check */
+		uint tx_stat_chk_prd = 5; /* check period 5 seconds */
+		uint tx_stat_chk_ratio = 8; /* check fail rate >= 80% */
+		uint tx_stat_chk_num = 5; /* check only if there is more than 5 packet send out in check period */
+
+		bcm_mkiovar("tx_stat_chk_num", (char *)&tx_stat_chk_num, 4, iovbuf, sizeof(iovbuf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+
+		bcm_mkiovar("tx_stat_chk_ratio", (char *)&tx_stat_chk_ratio, 4, iovbuf, sizeof(iovbuf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+
+		bcm_mkiovar("tx_stat_chk_prd", (char *)&tx_stat_chk_prd, 4, iovbuf, sizeof(iovbuf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+
+		bcm_mkiovar("tx_stat_chk", (char *)&tx_stat_chk, 4, iovbuf, sizeof(iovbuf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+}
+#endif
+//HTC_CSP_END
 
 	/* set srl and lrl */
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_SRL, (char *)&srl, sizeof(srl), TRUE, 0);

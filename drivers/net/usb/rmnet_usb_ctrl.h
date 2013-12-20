@@ -22,7 +22,8 @@
 #define CTRL_DEV_MAX_LEN 10
 
 //HTC_DBG+++
-#undef	HTC_DEBUG_QMI_TX_STUCK
+#define	HTC_DEBUG_QMI_TX_STUCK
+#define	HTC_CHECK_RESP_AVAILABLE
 //HTC_DBG---
 
 struct rmnet_ctrl_dev {
@@ -68,6 +69,12 @@ struct rmnet_ctrl_dev {
 	 * to avoid bigger  timeout value used by qmuxd
 	 */
 	bool			resp_available;
+//--------------------------------------------------------
+#ifdef HTC_CHECK_RESP_AVAILABLE
+	struct delayed_work	check_resp_available_work;
+	bool check_resp_available_work_is_inited;
+#endif	//HTC_CHECK_RESP_AVAILABLE
+//--------------------------------------------------------
 
 	unsigned int		mdm_wait_timeout;
 

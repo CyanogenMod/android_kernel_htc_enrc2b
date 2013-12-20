@@ -288,20 +288,6 @@ static inline void tegra_init_cache_tz(bool init)
 #endif	/* CONFIG_TRUSTED_FOUNDATIONS  */
 
 #ifdef CONFIG_CACHE_L2X0
-/*
- * We define our own outer_disable() to avoid L2 flush upon LP2 entry.
- * Since the Tegra kernel will always be in single core mode when
- * L2 is being disabled, we can omit the locking. Since we are not
- * accessing the spinlock we also avoid the problem of the spinlock
- * storage getting out of sync.
- */
-static inline void tegra_l2x0_disable(void)
-{
-	void __iomem *p = IO_ADDRESS(TEGRA_ARM_PERIF_BASE) + 0x3000;
-	writel_relaxed(0, p + L2X0_CTRL);
-	dsb();
-}
-
 void tegra_init_cache(bool init)
 {
 #ifdef CONFIG_TRUSTED_FOUNDATIONS
@@ -348,8 +334,6 @@ void tegra_init_cache(bool init)
 	aux_ctrl |= 0x7C000001;
 	if (init) {
 		l2x0_init(p, aux_ctrl, 0x8200c3fe);
-		/* use our outer_disable() routine to avoid flush */
-		outer_cache.disable = tegra_l2x0_disable;
 	} else {
 		u32 tmp;
 
@@ -1009,6 +993,204 @@ void __init tegra_release_bootloader_fb(void)
 						tegra_bootloader_fb_size))
 			pr_err("Failed to free bootloader fb.\n");
 }
+#if defined CONFIG_TEGRA_INTERACTIVE_GOV_ON_EARLY_SUSPEND \
+	|| defined CONFIG_TEGRA_CONSERVATIVE_GOV_ON_EARLY_SUSPEND
+static char cpufreq_gov_default[32];
+static char saved_boost_factor[32];
+static char saved_go_maxspeed_load[32];
+static char saved_max_boost[32];
+static char saved_sustain_load[32];
+
+static char saved_up_threshold[32];
+static char saved_down_threshold[32];
+static char saved_freq_step[32];
+
+
+void cpufreq_set_governor(char *governor)
+{
+	struct file *scaling_gov = NULL;
+	mm_segment_t old_fs;
+	char    buf[128];
+	int i = 0;
+	loff_t offset = 0;
+
+	if (governor == NULL)
+		return;
+
+	/* change to KERNEL_DS address limit */
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+#ifndef CONFIG_TEGRA_AUTO_HOTPLUG
+//	for_each_online_cpu(i)
+#endif
+	{
+		sprintf(buf, CPUFREQ_SYSFS_PLACE_HOLDER, i);
+		scaling_gov = filp_open(buf, O_RDWR, 0);
+		if (IS_ERR_OR_NULL(scaling_gov)) {
+			pr_err("%s. Can't open %s\n", __func__, buf);
+		} else {
+			if (scaling_gov->f_op != NULL &&
+				scaling_gov->f_op->write != NULL)
+				scaling_gov->f_op->write(scaling_gov,
+						governor,
+						strlen(governor),
+						&offset);
+			else
+				pr_err("f_op might be null\n");
+
+			filp_close(scaling_gov, NULL);
+		}
+	}
+	set_fs(old_fs);
+}
+
+static void cpufreq_read_governor_param(char *param_path, char *name, char *value)
+{
+	struct file *gov_param = NULL;
+	mm_segment_t old_fs;
+	static char buf[128];
+	loff_t offset = 0;
+
+	if (!value || !param_path || !name)
+		return;
+
+	/* change to KERNEL_DS address limit */
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	sprintf(buf, CPUFREQ_GOV_PARAM, param_path, name);
+	gov_param = filp_open(buf, O_RDONLY, 0);
+	if (!IS_ERR_OR_NULL(gov_param)) {
+		if (gov_param->f_op != NULL &&
+			gov_param->f_op->read != NULL)
+			gov_param->f_op->read(gov_param,
+					value,
+					32,
+					&offset);
+		else
+			pr_err("f_op might be null\n");
+
+		filp_close(gov_param, NULL);
+	} else {
+		pr_err("%s. Can't open %s\n", __func__, buf);
+	}
+	set_fs(old_fs);
+}
+
+static void set_governor_param(char *param_path, char *name, char *value)
+{
+	struct file *gov_param = NULL;
+	mm_segment_t old_fs;
+	static char buf[128];
+	loff_t offset = 0;
+
+	/* change to KERNEL_DS address limit */
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	sprintf(buf, CPUFREQ_GOV_PARAM, param_path, name);
+	gov_param = filp_open(buf, O_RDWR, 0);
+	if (!IS_ERR_OR_NULL(gov_param)) {
+		if (gov_param->f_op != NULL &&
+			gov_param->f_op->write != NULL)
+			gov_param->f_op->write(gov_param,
+					value,
+					strlen(value),
+					&offset);
+		else
+			pr_err("f_op might be null\n");
+
+		filp_close(gov_param, NULL);
+	}
+	set_fs(old_fs);
+}
+
+void cpufreq_set_governor_param(char *param_path, char *name, int value)
+{
+	char buf[32];
+	sprintf(buf, "%d", value);
+	set_governor_param(param_path, name, buf);
+}
+
+
+void cpufreq_save_governor(void)
+{
+	struct file *scaling_gov = NULL;
+	mm_segment_t old_fs;
+	char    buf[128];
+	loff_t offset = 0;
+
+	/* change to KERNEL_DS address limit */
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	buf[127] = 0;
+	sprintf(buf, CPUFREQ_SYSFS_PLACE_HOLDER,0);
+	scaling_gov = filp_open(buf, O_RDONLY, 0);
+	if (!IS_ERR_OR_NULL(scaling_gov)) {
+		if (scaling_gov->f_op != NULL &&
+			scaling_gov->f_op->read != NULL)
+			scaling_gov->f_op->read(scaling_gov,
+					cpufreq_gov_default,
+					32,
+					&offset);
+		else
+			pr_err("f_op might be null\n");
+
+		filp_close(scaling_gov, NULL);
+	} else {
+		pr_err("%s. Can't open %s\n", __func__, buf);
+	}
+	if (strncmp(cpufreq_gov_default,INTERACTIVE_GOVERNOR,
+				strlen(INTERACTIVE_GOVERNOR)) == 0) {
+		cpufreq_read_governor_param(INTERACTIVE_GOVERNOR, BOOST_FACTOR,
+					saved_boost_factor);
+		cpufreq_read_governor_param(INTERACTIVE_GOVERNOR, GO_MAXSPEED_LOAD,
+					saved_go_maxspeed_load);
+		cpufreq_read_governor_param(INTERACTIVE_GOVERNOR, MAX_BOOST,
+					saved_max_boost);
+		cpufreq_read_governor_param(INTERACTIVE_GOVERNOR, SUSTAIN_LOAD,
+					saved_sustain_load);
+	} else if (strncmp(cpufreq_gov_default, CONSERVATIVE_GOVERNOR,
+				strlen(CONSERVATIVE_GOVERNOR)) == 0) {
+		cpufreq_read_governor_param(CONSERVATIVE_GOVERNOR, UP_THRESHOLD,
+					saved_up_threshold);
+		cpufreq_read_governor_param(CONSERVATIVE_GOVERNOR, DOWN_THRESHOLD,
+					saved_down_threshold);
+		cpufreq_read_governor_param(CONSERVATIVE_GOVERNOR, FREQ_STEP,
+					saved_freq_step);
+	} else {
+	}
+	set_fs(old_fs);
+}
+
+void cpufreq_restore_governor(void)
+{
+	cpufreq_set_governor(cpufreq_gov_default);
+
+	if (strncmp(cpufreq_gov_default,INTERACTIVE_GOVERNOR,
+				strlen(INTERACTIVE_GOVERNOR)) == 0) {
+		set_governor_param(INTERACTIVE_GOVERNOR, BOOST_FACTOR,
+					saved_boost_factor);
+		set_governor_param(INTERACTIVE_GOVERNOR, GO_MAXSPEED_LOAD,
+					saved_go_maxspeed_load);
+		set_governor_param(INTERACTIVE_GOVERNOR, MAX_BOOST,
+					saved_max_boost);
+		set_governor_param(INTERACTIVE_GOVERNOR, SUSTAIN_LOAD,
+					saved_sustain_load);
+	} else if (strncmp(cpufreq_gov_default, CONSERVATIVE_GOVERNOR,
+				strlen(CONSERVATIVE_GOVERNOR)) == 0) {
+		set_governor_param(CONSERVATIVE_GOVERNOR, UP_THRESHOLD,
+					saved_up_threshold);
+		set_governor_param(CONSERVATIVE_GOVERNOR, DOWN_THRESHOLD,
+					saved_down_threshold);
+		set_governor_param(CONSERVATIVE_GOVERNOR, FREQ_STEP,
+					saved_freq_step);
+	}
+}
+#endif /* TEGRA_CONSERVATIVE_GOV_ON_EARLY_SUSPEND ||
+		TEGRA_INTERACTIVE_GOV_ON_EARLY_SUSPEND*/
+
 
 #if defined(CONFIG_MEMORY_FOOTPRINT_DEBUGGING)
 static struct resource memory_footprint_resources[] = {
@@ -1061,5 +1243,54 @@ void __init htc_memory_footprint_init(void)
 	err = platform_device_register(&memory_footprint_device);
 	if (err)
 		pr_err("[MF] %s: memory footprint registeration failed (%d)!\n", __func__, err);
+}
+#endif
+
+#if defined(CONFIG_HTC_FIQ_DUMPER)
+static struct resource fiq_dumper_resources[] = {
+	{
+		.flags = IORESOURCE_MEM,
+	},
+};
+
+static struct platform_device fiq_dumper_device = {
+	.name 		= "fiq_dumper",
+	.id 		= -1,
+	.num_resources	= ARRAY_SIZE(fiq_dumper_resources),
+	.resource	= fiq_dumper_resources,
+};
+
+void __init fiq_dumper_space_reserve(unsigned long size)
+{
+	struct resource *res;
+	long ret;
+
+	res = platform_get_resource(&fiq_dumper_device, IORESOURCE_MEM, 0);
+	if (!res) {
+		pr_err("fiq_dumper_space_reserve: failed to find memory resource\n");
+		goto fail;
+	}
+
+	res->start = memblock_end_of_DRAM() - size;
+	res->end = res->start + size - 1;
+	ret = memblock_remove(res->start, size);
+	if (ret) {
+		pr_err("fiq_dumper_space_reserve: failed to reserve memory block\n");
+		goto fail;
+	} else
+		pr_info("fiq_dumper_space_reserve: start=%zx, end=%zx\n", res->start, res->end);
+
+	return;
+fail:
+	fiq_dumper_device.resource = NULL;
+	fiq_dumper_device.num_resources = 0;
+}
+
+void __init fiq_dumper_init(void)
+{
+	int err;
+	err = platform_device_register(&fiq_dumper_device);
+	if (err)
+		pr_err("fiq_dumper_device registeration failed (%d)!\n", err);
 }
 #endif

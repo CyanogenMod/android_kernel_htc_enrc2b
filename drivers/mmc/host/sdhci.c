@@ -2088,10 +2088,9 @@ static void sdhci_tuning_timer(unsigned long data)
 
 static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 {
+	BUG_ON(intmask == 0);
 	int opcode;
 
-	BUG_ON(intmask == 0);
-	
 	if (!host->cmd) {
 		printk(KERN_ERR "%s: Got command interrupt 0x%08x even "
 			"though no command operation was in progress.\n",
@@ -2193,9 +2192,6 @@ static void sdhci_show_adma_error(struct sdhci_host *host) { }
 
 static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
 {
-	u32 opcode;
-	u32 argument;
-
 	BUG_ON(intmask == 0);
 
 	/* CMD19 generates _only_ Buffer Read Ready interrupt */
@@ -2229,6 +2225,8 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
 		return;
 	}
 
+	u32 opcode;
+	u32 argument;
 	if (host->data->mrq) {
 		if (host->data->mrq->cmd) {
 			opcode = host->data->mrq->cmd->opcode;

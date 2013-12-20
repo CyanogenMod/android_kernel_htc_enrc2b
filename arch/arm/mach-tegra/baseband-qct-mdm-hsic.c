@@ -37,8 +37,6 @@ extern void htc_mdm2ap_wakeup_irq_enable_disable(bool enable);
 //USB
 struct usb_device *mdm_usb1_1_usbdev = NULL;
 struct device *mdm_usb1_1_dev = NULL;
-struct usb_hcd *mdm_hsic_usb_hcd = NULL;
-struct ehci_hcd *mdm_hsic_ehci_hcd = NULL;
 
 struct usb_device *mdm_usb1_usbdev = NULL;
 struct device *mdm_usb1_dev = NULL;

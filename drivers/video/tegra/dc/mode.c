@@ -199,26 +199,24 @@ int tegra_dc_program_mode(struct tegra_dc *dc, struct tegra_dc_mode *mode)
 
 	/* TODO: MIPI/CRT/HDMI clock cals */
 
-	val = 0;
-	if (!(dc->out->type == TEGRA_DC_OUT_DSI ||
-		dc->out->type == TEGRA_DC_OUT_HDMI)) {
-		val = DISP_DATA_FORMAT_DF1P1C;
+	val = DISP_DATA_FORMAT_DF1P1C;
 
-		if (dc->out->align == TEGRA_DC_ALIGN_MSB)
-			val |= DISP_DATA_ALIGNMENT_MSB;
-		else
-			val |= DISP_DATA_ALIGNMENT_LSB;
+	if (dc->out->align == TEGRA_DC_ALIGN_MSB)
+		val |= DISP_DATA_ALIGNMENT_MSB;
+	else
+		val |= DISP_DATA_ALIGNMENT_LSB;
 
-		if (dc->out->order == TEGRA_DC_ORDER_RED_BLUE)
-			val |= DISP_DATA_ORDER_RED_BLUE;
-		else
-			val |= DISP_DATA_ORDER_BLUE_RED;
-	}
+	if (dc->out->order == TEGRA_DC_ORDER_RED_BLUE)
+		val |= DISP_DATA_ORDER_RED_BLUE;
+	else
+		val |= DISP_DATA_ORDER_BLUE_RED;
+
 	tegra_dc_writel(dc, val, DC_DISP_DISP_INTERFACE_CONTROL);
 
 	rate = tegra_dc_clk_get_rate(dc);
 
 	pclk = tegra_dc_pclk_round_rate(dc, mode->pclk);
+	trace_printk("%s:pclk=%ld\n", dc->ndev->name, pclk);
 	if (pclk < (mode->pclk / 100 * 99) ||
 	    pclk > (mode->pclk / 100 * 109)) {
 		dev_err(&dc->ndev->dev,
@@ -230,6 +228,7 @@ int tegra_dc_program_mode(struct tegra_dc *dc, struct tegra_dc_mode *mode)
 	}
 
 	div = (rate * 2 / pclk) - 2;
+	trace_printk("%s:div=%ld\n", dc->ndev->name, div);
 
 	tegra_dc_writel(dc, 0x00010001,
 			DC_DISP_SHIFT_CLOCK_OPTIONS);

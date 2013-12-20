@@ -40,6 +40,8 @@
 #include <asm/ptrace.h>
 #include <asm/localtimer.h>
 
+#include <mach/mfootprint.h>
+
 /*
  * as from 2.5, kernels no longer have an init_tasks structure
  * so we need some other way of telling a new secondary core
@@ -63,6 +65,7 @@ int __cpuinit __cpu_up(unsigned int cpu)
 	pgd_t *pgd;
 	int ret;
 
+	MF_DEBUG("00UP0008");
 	/*
 	 * Spawn a new process manually, if not already done.
 	 * Grab a pointer to its task struct so we can mess with it
@@ -82,6 +85,7 @@ int __cpuinit __cpu_up(unsigned int cpu)
 		init_idle(idle, cpu);
 	}
 
+	MF_DEBUG("00UP0009");
 	/*
 	 * Allocate initial page tables to allow the new CPU to
 	 * enable the MMU safely.  This essentially means a set
@@ -100,6 +104,7 @@ int __cpuinit __cpu_up(unsigned int cpu)
 		identity_mapping_add(pgd, __pa(_sdata), __pa(_edata));
 	}
 
+	MF_DEBUG("00UP0009");
 	/*
 	 * We need to tell the secondary core where to find
 	 * its stack and the page tables.
@@ -110,6 +115,7 @@ int __cpuinit __cpu_up(unsigned int cpu)
 	__cpuc_flush_dcache_area(&secondary_data, sizeof(secondary_data));
 	outer_clean_range(__pa(&secondary_data), __pa(&secondary_data + 1));
 
+	MF_DEBUG("00UP0010");
 	/*
 	 * Now bring the CPU into our world.
 	 */
@@ -138,6 +144,7 @@ int __cpuinit __cpu_up(unsigned int cpu)
 		pr_err("CPU%u: failed to boot: %d\n", cpu, ret);
 	}
 
+	MF_DEBUG("00UP0021");
 	secondary_data.stack = NULL;
 	secondary_data.pgdir = 0;
 
@@ -149,8 +156,10 @@ int __cpuinit __cpu_up(unsigned int cpu)
 		identity_mapping_del(pgd, __pa(_sdata), __pa(_edata));
 	}
 
+	MF_DEBUG("00UP0022");
 	pgd_free(&init_mm, pgd);
 
+	MF_DEBUG("00UP0023");
 	return ret;
 }
 
@@ -215,7 +224,7 @@ void __cpu_die(unsigned int cpu)
 		pr_err("CPU%u: cpu didn't die\n", cpu);
 		return;
 	}
-	//printk(KERN_NOTICE "CPU%u: shutdown\n", cpu);
+	printk(KERN_NOTICE "CPU%u: shutdown\n", cpu);
 
 	if (!platform_cpu_kill(cpu))
 		printk("CPU%u: unable to kill\n", cpu);
@@ -326,6 +335,7 @@ asmlinkage void __cpuinit secondary_start_kernel(void)
 	 * cpu_active bit is set, so it's safe to enalbe interrupts
 	 * now.
 	 */
+	mf_irq_leave(NULL);
 	local_irq_enable();
 	local_fiq_enable();
 
@@ -557,7 +567,7 @@ static void ipi_cpu_stop(unsigned int cpu)
 		spin_unlock(&stop_lock);
 	}
 
-	set_cpu_active(cpu, false);
+	set_cpu_online(cpu, false);
 
 	local_fiq_disable();
 	local_irq_disable();
@@ -686,10 +696,10 @@ void smp_send_stop(void)
 
 	/* Wait up to one second for other CPUs to stop */
 	timeout = USEC_PER_SEC;
-	while (num_active_cpus() > 1 && timeout--)
+	while (num_online_cpus() > 1 && timeout--)
 		udelay(1);
 
-	if (num_active_cpus() > 1)
+	if (num_online_cpus() > 1)
 		pr_warning("SMP: failed to stop secondary CPUs\n");
 }
 

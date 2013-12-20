@@ -155,7 +155,7 @@ static DEFINE_TIMER(rmnet_usb_ctrl_read_fatal_timer, rmnet_usb_ctrl_read_fatal_t
 
 static void rmnet_usb_ctrl_read_timer_expire(unsigned long data)
 {
-	struct rmnet_ctrl_dev *dev = (rmnet_ctrl_dev *)data;
+	struct rmnet_ctrl_dev *dev = data;
 
 	dev_err(dev->devicep, "[%s] %s rcv_timer expire \n", __func__, dev->name);
 	trace_printk("[%s]\n", __func__);
@@ -169,6 +169,31 @@ static void rmnet_usb_ctrl_read_timer_expire(unsigned long data)
 	//mod_timer(&rmnet_usb_ctrl_read_fatal_timer, jiffies + msecs_to_jiffies(5000));
 }
 #endif	//HTC_DEBUG_QMI_TX_STUCK
+//--------------------------------------------------------
+
+//--------------------------------------------------------
+#ifdef HTC_CHECK_RESP_AVAILABLE
+static void check_resp_available_work_fn (struct work_struct *work)
+{
+	struct rmnet_ctrl_dev	*dev =
+		container_of(work, struct rmnet_ctrl_dev, check_resp_available_work.work);
+
+	dev_info(&(dev->intf->dev), "%s dev->resp_available:0x%x\n", __func__, dev->resp_available);
+
+	if (dev->resp_available == 0) {
+		if (get_radio_flag() & 0x0002) {
+			extern void trigger_ap2mdm_errfatal(void);
+			printk("%s trigger_ap2mdm_errfatal\n", __func__);
+			trigger_ap2mdm_errfatal();
+		}
+		else {
+			extern void trigger_mdm_silent_reset(void);
+			printk("%s trigger_mdm_silent_reset\n", __func__);
+			trigger_mdm_silent_reset();
+		}
+	}
+}
+#endif	//HTC_CHECK_RESP_AVAILABLE
 //--------------------------------------------------------
 
 static void notification_available_cb(struct urb *urb)
@@ -387,6 +412,12 @@ static int rmnet_usb_ctrl_start_rx(struct rmnet_ctrl_dev *dev)
 	if (retval < 0)
 		dev_err(dev->devicep, "%s Intr submit %d\n", __func__, retval);
 
+	if (get_radio_flag() & 0x0008) {
+		if (dev && dev->intf) {
+			dev_info(&(dev->intf->dev), "%s submit dev->inturb:0x%x, retval:%x\n", __func__, dev->inturb, retval);
+		}
+	}
+
 	return retval;
 }
 
@@ -399,6 +430,12 @@ int rmnet_usb_ctrl_stop_rx(struct rmnet_ctrl_dev *dev)
 	}
 
 	dev_dbg(dev->devicep, "%s\n", __func__);
+
+	if (get_radio_flag() & 0x0008) {
+		if (dev && dev->intf) {
+			dev_info(&(dev->intf->dev), "%s kill dev->inturb:0x%x\n", __func__, dev->inturb);
+		}
+	}
 
 	usb_kill_urb(dev->rcvurb);
 	usb_kill_urb(dev->inturb);
@@ -662,11 +699,6 @@ static int rmnet_usb_ctrl_write(struct rmnet_ctrl_dev *dev, char *buf,
 }
 
 
-static int trigger_errfatal_once= 0 ;
-int open_hsicctl_timeout_trigger_errfatal = 0;
-
-extern void trigger_ap2mdm_errfatal(void);
-
 static int rmnet_ctl_open(struct inode *inode, struct file *file)
 {
 	int			retval = 0;
@@ -681,12 +713,6 @@ pr_info("%s+ \n", __func__);
 	if (dev->is_opened)
 		goto already_opened;
 
-		if (open_hsicctl_timeout_trigger_errfatal) {
-			return -ETIMEDOUT;
-		}
-		else
-			trigger_errfatal_once = 0;
-
 	/*block open to get first response available from mdm*/
 	if (dev->mdm_wait_timeout && !dev->resp_available) {
 		retval = wait_event_interruptible_timeout(
@@ -695,15 +721,9 @@ pr_info("%s+ \n", __func__);
 					msecs_to_jiffies(dev->mdm_wait_timeout *
 									1000));
 
-		if (retval == 0 && !trigger_errfatal_once) {
-			dev_err(dev->devicep, "%s: Timeout opening  %s\n",
+		if (retval == 0) {
+			dev_err(dev->devicep, "%s: Timeout opening %s\n",
 						__func__, dev->name);
-			if (already_register_rmNET) {
-			printk("%s trigger_ap2mdm_errfatal\n", __func__);
-			trigger_errfatal_once = 1;
-			open_hsicctl_timeout_trigger_errfatal = 1;
-			trigger_ap2mdm_errfatal();
-		}
 			return -ETIMEDOUT;
 		} else if (retval < 0) {
 			dev_err(dev->devicep, "%s: Error waiting for %s\n",
@@ -713,7 +733,7 @@ pr_info("%s+ \n", __func__);
 	}
 
 	if (!dev->resp_available) {
-		dev_dbg(dev->devicep, "%s: Connection timedout opening %s\n",
+		dev_err(dev->devicep, "%s: Connection timedout opening %s\n",
 					__func__, dev->name);
 		return -ETIMEDOUT;
 	}
@@ -730,9 +750,6 @@ already_opened:
 
 	return 0;
 }
-
-
-EXPORT_SYMBOL_GPL(open_hsicctl_timeout_trigger_errfatal);
 
 static int rmnet_ctl_release(struct inode *inode, struct file *file)
 {
@@ -994,6 +1011,11 @@ int rmnet_usb_ctrl_probe(struct usb_interface *intf,
 	dev->int_pipe = usb_rcvintpipe(udev,
 		int_in->desc.bEndpointAddress & USB_ENDPOINT_NUMBER_MASK);
 
+	if (intf) {
+		dev_info(&intf->dev, "%s[%d] dev->int_pipe:0x%x bEndpointAddress:0x%x, bmAttributes:0x%x\n", __func__, __LINE__,
+			dev->int_pipe, int_in->desc.bEndpointAddress, int_in->desc.bmAttributes);
+	}
+
 	mutex_lock(&dev->dev_lock);
 	dev->intf = intf;
 
@@ -1055,6 +1077,16 @@ int rmnet_usb_ctrl_probe(struct usb_interface *intf,
 #endif	//CONFIG_HTC_QCT_9K_MDM_HSIC_PM_DBG
 //--------------------------------------------------------
 	usb_mark_last_busy(udev);
+
+//--------------------------------------------------------
+#ifdef HTC_CHECK_RESP_AVAILABLE
+	if (dev->check_resp_available_work_is_inited) {
+		dev_info(&(dev->intf->dev), "%s schedule_delayed_work check_resp_available_work \n", __func__);
+		schedule_delayed_work(&dev->check_resp_available_work, msecs_to_jiffies(10*1000));
+	}
+#endif	//HTC_CHECK_RESP_AVAILABLE
+//--------------------------------------------------------
+
 	return rmnet_usb_ctrl_start_rx(dev);
 }
 
@@ -1217,6 +1249,17 @@ int rmnet_usb_ctrl_init(void)
 		init_waitqueue_head(&dev->open_wait_queue);
 		INIT_LIST_HEAD(&dev->rx_list);
 		init_usb_anchor(&dev->tx_submitted);
+//--------------------------------------------------------
+#ifdef HTC_CHECK_RESP_AVAILABLE
+		//Only init check_resp_available_work at first channel
+		if (n == 0) {
+			dev->check_resp_available_work_is_inited = true;
+			INIT_DELAYED_WORK(&dev->check_resp_available_work, check_resp_available_work_fn);
+		}
+		else
+			dev->check_resp_available_work_is_inited = false;
+#endif	//HTC_CHECK_RESP_AVAILABLE
+//--------------------------------------------------------
 
 		status = rmnet_usb_ctrl_alloc_rx(dev);
 		if (status < 0) {
@@ -1265,7 +1308,11 @@ int rmnet_usb_ctrl_init(void)
 			kfree(ctrl_dev[n]);
 			goto error2;
 		}
+		//HTC++
+		//Force set mdm_wait_timeout to 1s to prevent qmuxd blocked in rmnet_ctl_open() too long time
+		dev->mdm_wait_timeout = 1;
 		/*create /sys/class/hsicctl/hsicctlx/modem_wait*/
+		/*
 		status = device_create_file(ctrl_dev[n]->devicep,
 					&dev_attr_modem_wait);
 		if (status) {
@@ -1275,6 +1322,8 @@ int rmnet_usb_ctrl_init(void)
 			kfree(ctrl_dev[n]);
 			goto error2;
 		}
+		*/
+		//HTC--
 		dev_set_drvdata(ctrl_dev[n]->devicep, ctrl_dev[n]);
 	}
 

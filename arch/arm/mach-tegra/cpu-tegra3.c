@@ -34,18 +34,16 @@
 #include <linux/seq_file.h>
 #include <linux/pm_qos_params.h>
 #include <linux/cpu_debug.h>
+#include <mach/mfootprint.h>
 
 #include "pm.h"
 #include "cpu-tegra.h"
 #include "clock.h"
-#include "tegra_pmqos.h"
 
 #define INITIAL_STATE		TEGRA_HP_DISABLED
 #define UP2G0_DELAY_MS		70
 #define UP2Gn_DELAY_MS		100
-#define DOWN_DELAY_MS		500
-
-extern unsigned int best_core_to_turn_up (void);
+#define DOWN_DELAY_MS		2000
 
 static struct mutex *tegra3_cpu_lock;
 
@@ -717,7 +715,7 @@ static void tegra_auto_hotplug_work_func(struct work_struct *work)
 			switch (tegra_cpu_speed_balance()) {
 			/* cpu speed is up and balanced - one more on-line */
 			case TEGRA_CPU_SPEED_BALANCED:
-				cpu = best_core_to_turn_up ();
+				cpu = cpumask_next_zero(0, cpu_online_mask);
 				if (cpu < nr_cpu_ids)
 					up = true;
 				break;
@@ -766,6 +764,8 @@ static void tegra_auto_hotplug_work_func(struct work_struct *work)
 }
 
 #if defined(CONFIG_BEST_TRADE_HOTPLUG)
+extern unsigned int best_core_to_turn_up (void);
+
 unsigned int g2lp_bottom_freq (void) {
     return idle_bottom_freq;
 }
@@ -806,6 +806,7 @@ void bthp_auto_hotplug_work_func (
     unsigned int curr_speed = 0;
     unsigned int ret = 0;
 
+    MF_DEBUG("00UP0000");
     mutex_lock (tegra3_cpu_lock);
 
     /* final chance to turn around to bring required cores up */
@@ -840,6 +841,7 @@ void bthp_auto_hotplug_work_func (
                 unsigned int core_to_online = best_core_to_turn_up ();
 
                 if (core_to_online < nr_cpu_ids) {
+                    MF_DEBUG("00UP0001");
 		    if (!cpu_up (core_to_online)) {
                         cpumask_set_cpu (core_to_online, &awake_cores);
                         CPU_DEBUG_PRINTK (
@@ -966,6 +968,7 @@ void bthp_auto_hotplug_work_func (
                bthp_wq_params.dest_core != 0)
     {
         if (bthp_wq_params.core_num_diff > 0) {
+	    MF_DEBUG("00UP0002");
             cpu_up (bthp_wq_params.dest_core);
             CPU_DEBUG_PRINTK (CPU_DEBUG_HOTPLUG,
                               " TURN ON CPU %d, online CPU 0-3=[%d%d%d%d]\n",
@@ -990,13 +993,16 @@ void bthp_auto_hotplug_work_func (
     if (hp_state != TEGRA_HP_DISABLED)
         hp_state = TEGRA_HP_IDLE;
 
+    MF_DEBUG("00UP0029");
     if (is_plugging) {
         /* catch-up with up-to-date governor target speed */
         tegra_cpu_set_speed_cap (NULL);
 
         is_plugging = false;
     }
+    MF_DEBUG("00UP0051");
 	mutex_unlock(tegra3_cpu_lock);
+    MF_DEBUG("00UP0052");
 }
 
 bool bthp_do_hotplug (
@@ -1064,16 +1070,8 @@ bool bthp_cpu_num_catchup (void)
 EXPORT_SYMBOL (bthp_cpu_num_catchup);
 #endif
 
-static int max_cpus_notify(struct notifier_block *nb, unsigned long n, void *p)
-{
-	pr_info("PM QoS PM_QOS_MAX_ONLINE_CPUS %lu\n", n);
-	return NOTIFY_OK;
-}
-
 static int min_cpus_notify(struct notifier_block *nb, unsigned long n, void *p)
 {
-	pr_info("PM QoS PM_QOS_MIN_ONLINE_CPUS %lu\n", n);
-
 	mutex_lock(tegra3_cpu_lock);
 
 	if ((n >= 1) && is_lp_cluster()) {
@@ -1098,10 +1096,6 @@ static int min_cpus_notify(struct notifier_block *nb, unsigned long n, void *p)
 
 static struct notifier_block min_cpus_notifier = {
 	.notifier_call = min_cpus_notify,
-};
-
-static struct notifier_block max_cpus_notifier = {
-	.notifier_call = max_cpus_notify,
 };
 
 void tegra_auto_hotplug_governor(unsigned int cpu_freq, bool suspend)
@@ -1139,10 +1133,10 @@ void tegra_auto_hotplug_governor(unsigned int cpu_freq, bool suspend)
 		bottom_freq = idle_bottom_freq;
 
 #if defined(CONFIG_BEST_TRADE_HOTPLUG)
-        if (likely(bthp_en)) {
-            bthp_cpuup_standalone (cpu_freq);
-            return;
-        }
+	        if (likely(bthp_en)) {
+			bthp_cpuup_standalone (cpu_freq);
+			return;
+	        }
 #endif
 	}
 
@@ -1192,12 +1186,6 @@ void tegra_auto_hotplug_governor(unsigned int cpu_freq, bool suspend)
 	}
 }
 
-void tegra_lpmode_freq_max_changed(void)
-{
-	idle_top_freq = tegra_lpmode_freq_max();
-	pr_info("%s: idle_top_freq = %d\n", __func__, idle_top_freq);
-}
-
 int tegra_auto_hotplug_init(struct mutex *cpu_lock)
 {
 	/*
@@ -1224,7 +1212,7 @@ int tegra_auto_hotplug_init(struct mutex *cpu_lock)
 	if (IS_ERR(cpu_clk) || IS_ERR(cpu_g_clk) || IS_ERR(cpu_lp_clk))
 		return -ENOENT;
 
-	idle_top_freq = tegra_lpmode_freq_max();
+	idle_top_freq = clk_get_max_rate(cpu_lp_clk) / 1000;
 	idle_bottom_freq = clk_get_min_rate(cpu_g_clk) / 1000;
 
 	up2g0_delay = msecs_to_jiffies(UP2G0_DELAY_MS);
@@ -1241,10 +1229,6 @@ int tegra_auto_hotplug_init(struct mutex *cpu_lock)
 
 	if (pm_qos_add_notifier(PM_QOS_MIN_ONLINE_CPUS, &min_cpus_notifier))
 		pr_err("%s: Failed to register min cpus PM QoS notifier\n",
-			__func__);
-
-	if (pm_qos_add_notifier(PM_QOS_MAX_ONLINE_CPUS, &max_cpus_notifier))
-		pr_err("%s: Failed to register max cpus PM QoS notifier\n",
 			__func__);
 
 	return 0;

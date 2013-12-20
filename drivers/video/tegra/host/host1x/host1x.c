@@ -358,13 +358,11 @@ fail:
 
 struct nvhost_channel *nvhost_alloc_channel(struct nvhost_device *dev)
 {
-	BUG_ON(!host_device_op().alloc_nvhost_channel);
 	return host_device_op().alloc_nvhost_channel(dev);
 }
 
 void nvhost_free_channel(struct nvhost_channel *ch)
 {
-	BUG_ON(!host_device_op().free_nvhost_channel);
 	host_device_op().free_nvhost_channel(ch);
 }
 

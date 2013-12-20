@@ -159,8 +159,7 @@ static int nvhost_channelopen(struct inode *inode, struct file *filp)
 	}
 	filp->private_data = priv;
 	priv->ch = ch;
-	if(nvhost_module_add_client(ch->dev, priv))
-		goto fail;
+	nvhost_module_add_client(ch->dev, priv);
 
 	if (ch->ctxhandler && ch->ctxhandler->alloc) {
 		priv->hwctx = ch->ctxhandler->alloc(ch->ctxhandler, ch);
@@ -457,7 +456,7 @@ static long nvhost_channelctl(struct file *filp,
 	}
 	case NVHOST_IOCTL_CHANNEL_GET_SYNCPOINTS:
 		/* host syncpt ID is used by the RM (and never be given out) */
-		BUG_ON(priv->ch->dev->syncpts & (1 << NVSYNCPT_GRAPHICS_HOST));
+
 		((struct nvhost_get_param_args *)buf)->value =
 			priv->ch->dev->syncpts;
 		break;
