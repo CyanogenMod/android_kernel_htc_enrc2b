@@ -294,6 +294,11 @@ static s32 wl_enq_event(struct wl_priv *wl, struct net_device *ndev, u32 type,
 	const wl_event_msg_t *msg, void *data);
 static void wl_put_event(struct wl_event_q *e);
 static void wl_wakeup_event(struct wl_priv *wl);
+//HTC_CSP_START
+#if defined(HTC_TX_TRACKING)
+static s32 wl_notify_txfail(struct wl_priv *wl, struct net_device *ndev, const wl_event_msg_t *e, void *data);
+#endif
+//HTC_CSP_END
 static s32 wl_notify_connect_status_ap(struct wl_priv *wl, struct net_device *ndev,
 	const wl_event_msg_t *e, void *data);
 static s32 wl_notify_connect_status(struct wl_priv *wl,
@@ -2420,6 +2425,10 @@ scan_out:
 		busy_count = 0;
 		disconnect_flag = 0;
 	}
+
+	if ( wl_get_drv_status(wl, SCANNING, ndev) ) {
+		printf("%s: discard scan due to busy\n", __FUNCTION__);
+	}
 	wl_clr_drv_status(wl, SCANNING, ndev);
 	if (timer_pending(&wl->scan_timeout))
 		del_timer_sync(&wl->scan_timeout);
@@ -3847,6 +3856,7 @@ wl_cfg80211_get_station(struct wiphy *wiphy, struct net_device *dev,
 			sta->idle * 1000));
 #endif
 	} else if (wl_get_mode_by_netdev(wl, dev) == WL_MODE_BSS) {
+		get_pktcnt_t pktcnt;
 		u8 *curmacp = wl_read_prof(wl, dev, WL_PROF_BSSID);
 		if (!wl_get_drv_status(wl, CONNECTED, dev) ||
 			(dhd_is_associated(dhd, NULL, &err) == FALSE)) {
@@ -3900,6 +3910,18 @@ wl_cfg80211_get_station(struct wiphy *wiphy, struct net_device *dev,
 		old_rssi = rssi; /* 2012-09-30 patch for link down cause by busy APSTA Traffic ++++*/
 		WL_DBG(("RSSI %d dBm\n", rssi));
 
+		err = wldev_ioctl(dev, WLC_GET_PKTCNTS, &pktcnt,
+			sizeof(pktcnt), false);
+		if (!err) {
+			sinfo->filled |= (STATION_INFO_RX_PACKETS |
+				STATION_INFO_RX_DROP_MISC |
+				STATION_INFO_TX_PACKETS |
+				STATION_INFO_TX_FAILED);
+			sinfo->rx_packets = pktcnt.rx_good_pkt;
+			sinfo->rx_dropped_misc = pktcnt.rx_bad_pkt;
+			sinfo->tx_packets = pktcnt.tx_good_pkt;
+			sinfo->tx_failed  = pktcnt.tx_bad_pkt;
+		}
 get_station_err:
 		if (err && (err != -ERESTARTSYS)) {
 			/* Disconnect due to zero BSSID or error to get RSSI */
@@ -4015,12 +4037,14 @@ static s32 wl_cfg80211_suspend(struct wiphy *wiphy)
 		wl_set_drv_status(wl, SCAN_ABORTING, iter->ndev);
 	wl_term_iscan(wl);
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
-	if(is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		cfg80211_scan_done(wl->scan_request, true);
-		
+		wl->scan_request = NULL;
 	}
-	wl->scan_request = NULL;
 	for_each_ndev(wl, iter, next) {
+		if ( wl_get_drv_status(wl, SCANNING, iter->ndev) ) {
+			printf("%s: discard scan due to suspend\n", __FUNCTION__);
+		}
 		wl_clr_drv_status(wl, SCANNING, iter->ndev);
 		wl_clr_drv_status(wl, SCAN_ABORTING, iter->ndev);
 	}
@@ -4372,6 +4396,9 @@ wl_cfg80211_send_pending_tx_act_frm(struct wl_priv *wl)
 		 * starting a scan or changing the channel.
 		 */
 
+		if ( wl_get_drv_status(wl, SCANNING, wl->afx_hdl->dev) ) {
+			printf("%s: discard scan due to action frame\n", __FUNCTION__);
+		}
 		wl_clr_drv_status(wl, SCANNING, wl->afx_hdl->dev);
 /* Do not abort scan for VSDB. Scan will be aborted in firmware if necessary */
 #ifndef WL_CFG80211_VSDB_PRIORITIZE_SCAN_REQUEST
@@ -4456,6 +4483,9 @@ wl_cfg80211_send_at_common_channel(struct wl_priv *wl,
 	}
 	wl->afx_hdl->is_active = FALSE;
 
+	if ( wl_get_drv_status(wl, SCANNING, dev) ) {
+		printf("%s: discard scan due to send action frame\n", __FUNCTION__);
+	}
 	wl_clr_drv_status(wl, SCANNING, dev);
 	wl_clr_drv_status(wl, FINDING_COMMON_CHANNEL, dev);
 	if (wl->afx_hdl->peer_chan != WL_INVALID)
@@ -6568,6 +6598,19 @@ static s32 wl_inform_single_bss(struct wl_priv *wl, struct wl_bss_info *bi)
 			notif_bss_info->frame_len));
 
 	signal = notif_bss_info->rssi * 100;
+	if (!mgmt->u.probe_resp.timestamp) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39)
+		struct timespec ts;
+		get_monotonic_boottime(&ts);
+		mgmt->u.probe_resp.timestamp = ((u64)ts.tv_sec*1000000)
+			+ ts.tv_nsec / 1000;
+#else
+		struct timeval tv;
+		do_gettimeofday(&tv);
+		mgmt->u.probe_resp.timestamp = ((u64)tv.tv_sec*1000000)
+			+ tv.tv_usec;
+#endif
+	}
 
 	cbss = cfg80211_inform_bss_frame(wiphy, channel, mgmt,
 		le16_to_cpu(notif_bss_info->frame_len), signal, aflags);
@@ -6608,11 +6651,20 @@ static bool wl_is_linkdown(struct wl_priv *wl, const wl_event_msg_t *e)
 {
 	u32 event = ntoh32(e->event_type);
 	u16 flags = ntoh16(e->flags);
+	/*HTC_WIFI_START*/
+	struct net_device *ndev = wl_to_prmry_ndev(wl);
+	/*HTC_WIFI_END*/
 
 	if (event == WLC_E_DEAUTH_IND ||
 	event == WLC_E_DISASSOC_IND ||
 	event == WLC_E_DISASSOC ||
 	event == WLC_E_DEAUTH) {
+		/*HTC_WIFI_START*/
+		if ((event == WLC_E_DEAUTH) &&(!wl_get_drv_status(wl, CONNECTED, ndev))){
+			WL_ERR(("wl_is_linkdown wifi is not connected\n"));
+			return false;
+		}
+		/*HTC_WIFI_END*/
 		return true;
 	} else if (event == WLC_E_LINK) {
 		if (!(flags & WLC_EVENT_MSG_LINK))
@@ -7297,11 +7349,10 @@ wl_notify_scan_status(struct wl_priv *wl, struct net_device *ndev,
 scan_done_out:
 	del_timer_sync(&wl->scan_timeout);
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
-	if(is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		cfg80211_scan_done(wl->scan_request, false);
-		
+		wl->scan_request = NULL;
 	}
-	wl->scan_request = NULL;
 	spin_unlock_irqrestore(&wl->cfgdrv_lock, flags);
 	WL_DBG(("cfg80211_scan_done\n"));
 	mutex_unlock(&wl->usr_sync);
@@ -7659,6 +7710,11 @@ static void wl_init_event_handler(struct wl_priv *wl)
 	wl->evt_handler[WLC_E_P2P_DISC_LISTEN_COMPLETE] = wl_cfgp2p_listen_complete;
 	wl->evt_handler[WLC_E_ACTION_FRAME_COMPLETE] = wl_cfgp2p_action_tx_complete;
 	wl->evt_handler[WLC_E_ACTION_FRAME_OFF_CHAN_COMPLETE] = wl_cfgp2p_action_tx_complete;
+//HTC_CSP_START
+#if defined(HTC_TX_TRACKING)
+	wl->evt_handler[WLC_E_TX_STAT_ERROR] = wl_notify_txfail;
+#endif
+//HTC_CSP_END
 
 }
 
@@ -7842,10 +7898,14 @@ static s32 wl_create_event_handler(struct wl_priv *wl)
 
 	/* Do not use DHD in cfg driver */
 retry:
-	if (count < 10) {
+	if (count < 100) {
 		ret = 0;
 		wl->event_tsk.thr_pid = -1;
+#ifdef USE_KTHREAD_API
+		PROC_START2(wl_event_handler, wl, &wl->event_tsk, 0, "wl_event_handler");
+#else
 		PROC_START(wl_event_handler, wl, &wl->event_tsk, 0);
+#endif
 		if ((wl->event_tsk.thr_pid < 0) || (wl->event_tsk.thr_pid > 0xf0000000)) {
 			printf("%s: %dnd Create thread failed\n", __func__, count);
 			count++;
@@ -7892,11 +7952,9 @@ static void wl_notify_iscan_complete(struct wl_iscan_ctrl *iscan, bool aborted)
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
 	wl_clr_drv_status(wl, SCANNING, ndev);
 	if (likely(wl->scan_request)) {
-		if(is_scan_request_valid(wl->scan_request))
 		cfg80211_scan_done(wl->scan_request, aborted);
-		
+		wl->scan_request = NULL;
 	}
-	wl->scan_request = NULL;
 	spin_unlock_irqrestore(&wl->cfgdrv_lock, flags);
 	wl->iscan_kickstart = false;
 }
@@ -8222,11 +8280,9 @@ static s32 wl_notify_escan_complete(struct wl_priv *wl,
 #endif /* ESCAN_RESULT_PATCH */
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
 	if (likely(wl->scan_request)) {
-		if(is_scan_request_valid(wl->scan_request))
 		cfg80211_scan_done(wl->scan_request, aborted);
-		
+		wl->scan_request = NULL;
 	}
-	wl->scan_request = NULL;
 	if (p2p_is_on(wl))
 		wl_clr_p2p_status(wl, SCANNING);
 	wl_clr_drv_status(wl, SCANNING, dev);
@@ -9046,8 +9102,10 @@ static s32 wl_event_handler(void *data)
 	tsk_ctl_t *tsk = (tsk_ctl_t *)data;
 
 	wl = (struct wl_priv *)tsk->parent;
+#ifndef USE_KTHREAD_API
 	DAEMONIZE("dhd_cfg80211_event");
 	complete(&tsk->completed);
+#endif
 
 	while (down_interruptible (&tsk->sema) == 0) {
 		SMP_RD_BARRIER_DEPENDS();
@@ -9091,6 +9149,18 @@ static void wl_cfg80211_send_priv_event
 #endif
 	return;
 }
+
+//HTC_CSP_START
+#if defined(HTC_TX_TRACKING)
+static s32 wl_notify_txfail(struct wl_priv *wl, struct net_device *ndev, const wl_event_msg_t *e, void *data)
+{
+        printf("Tx fail!!");
+        wl_cfg80211_send_priv_event(ndev, "TX_FAIL");
+        return 0;
+}
+#endif
+//HTC_CSP_END
+
 #if defined(SOFTAP)
 static void wl_cfg80211_hotspot_event_process(struct net_device *ndev, const wl_event_msg_t *e, void *data)
 {
@@ -9682,11 +9752,10 @@ static s32 __wl_cfg80211_down(struct wl_priv *wl)
 
 	wl_term_iscan(wl);
 	spin_lock_irqsave(&wl->cfgdrv_lock, flags);
-	if(is_scan_request_valid(wl->scan_request)) {
+	if (wl->scan_request) {
 		cfg80211_scan_done(wl->scan_request, true);
-		
+		wl->scan_request = NULL;
 	}
-	wl->scan_request = NULL;
 	spin_unlock_irqrestore(&wl->cfgdrv_lock, flags);
 	for_each_ndev(wl, iter, next) {
 		wl_clr_drv_status(wl, READY, iter->ndev);
@@ -10228,6 +10297,36 @@ static void get_primary_mac(struct wl_priv *wl, struct ether_addr *mac)
 		0, wl->ioctl_buf, WLC_IOCTL_SMLEN, 0, &wl->ioctl_buf_sync);
 	memcpy(mac->octet, wl->ioctl_buf, ETHER_ADDR_LEN);
 }
+
+// brcm 2012-10-24
+void wl_cfg80211_abort_connecting(void)
+{
+	struct wl_priv *wl = wlcfg_drv_priv;
+	struct net_device *dev;
+
+	if(!wl) {
+		printf("%s : wl is null, return\n",__func__);
+		return;
+	}
+
+	dev = wl_to_prmry_ndev(wl);
+	if(!dev) {
+        printf("%s : dev is null, return\n",__func__);
+        return;
+	}
+	if (wl_get_drv_status(wl, CONNECTING, dev)) {
+		int val = 0;
+		int err;
+		printf("%s: abort the connecting procedure.\n", __FUNCTION__);
+        err = wldev_ioctl(dev, WLC_DISASSOC, &val, sizeof(val), true);
+        if (unlikely(err)) {
+	        WL_ERR(("call WLC_DISASSOC failed. (%d)\n", err));
+	    }
+        /* notify wpa_supplicant the association abort */
+        wl_bss_connect_done(wl, dev, NULL, NULL, false);
+    }
+}		
+// 2012-10-24 end
 
 //BRCM APSTA START
 #ifdef APSTA_CONCURRENT

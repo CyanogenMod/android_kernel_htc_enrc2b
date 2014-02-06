@@ -32,6 +32,10 @@ static ssize_t htc_battery_show_property(struct device *dev,
 					struct device_attribute *attr,
 					char *buf);
 
+static ssize_t htc_battery_rt_attr_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf);
+
 static int htc_power_get_property(struct power_supply *psy,
 				enum power_supply_property psp,
 				union power_supply_propval *val);
@@ -94,7 +98,6 @@ static struct work_struct batt_charger_ctrl_work;
 struct workqueue_struct *batt_charger_ctrl_wq;
 static unsigned int charger_ctrl_stat;
 static unsigned int phone_call_stat;
-static unsigned int navigation_stat;
 
 static enum power_supply_property htc_battery_properties[] = {
 	POWER_SUPPLY_PROP_STATUS,
@@ -219,6 +222,15 @@ static ssize_t htc_battery_show_batt_power_meter(struct device *dev,
 	return battery_core_info.func.func_show_batt_power_meter(attr, buf);
 }
 
+static ssize_t htc_battery_show_htc_extension_attr(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	if (battery_core_info.func.func_show_htc_extension_attr)
+		return battery_core_info.func.func_show_htc_extension_attr(attr, buf);
+	return 0;
+}
+
 static ssize_t htc_battery_set_delta(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
@@ -321,17 +333,6 @@ static ssize_t htc_battery_phone_call_stat(struct device *dev,
 	return i;
 }
 
-static ssize_t htc_battery_navigation_stat(struct device *dev,
-				struct device_attribute *attr,
-				char *buf)
-{
-	int i = 0;
-
-	i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", navigation_stat);
-
-	return i;
-}
-
 static ssize_t htc_battery_charger_switch(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
@@ -413,32 +414,57 @@ static ssize_t htc_battery_phone_call_switch(struct device *dev,
 	}
 
 	battery_core_info.func.func_phone_call_notification(phone_call);
-	phone_call_stat = phone_call;
 
+	if (!battery_core_info.func.func_limit_charging_notification) {
+		BATT_ERR("No limit charging notification function!");
+		goto no_limit_charging;
+	}
+	battery_core_info.func.func_limit_charging_notification(LIMIT_CHARGING_PHONE_CALL, phone_call);
+
+no_limit_charging:
+	phone_call_stat = phone_call;
 	return count;
 }
 
-static ssize_t htc_battery_navigation_switch(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	unsigned long navigation = 0;
-	int rc = 0;
-
-	rc = strict_strtoul(buf, 10, &navigation);
-	if (rc)
-		return rc;
-
-	if (!battery_core_info.func.func_navigation_notification) {
-		BATT_ERR("No navigation notification function!");
-		return -ENOENT;
+#define LIMIT_CHARGING_FILENODE_FUNC(_name, _limit_type)					\
+	static unsigned int _name##_stat;							\
+	static ssize_t htc_battery_##_name##_stat(struct device *dev,				\
+				struct device_attribute *attr,					\
+				char *buf)							\
+	{											\
+		int i = 0;									\
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", _name##_stat);			\
+		return i;									\
+	}											\
+												\
+	static ssize_t htc_battery_##_name##_switch(struct device *dev,				\
+					struct device_attribute *attr,				\
+					const char *buf, size_t count)				\
+	{											\
+		unsigned long value = 0;							\
+		int rc = 0;									\
+		rc = strict_strtoul(buf, 10, &value);						\
+		if (rc)										\
+			return rc;								\
+		if (!battery_core_info.func.func_limit_charging_notification) {			\
+			BATT_ERR("No limit charging notification function!");			\
+			return -ENOENT;								\
+		}										\
+		battery_core_info.func.func_limit_charging_notification(_limit_type, value);	\
+		_name##_stat = value;								\
+		return count;									\
 	}
 
-	battery_core_info.func.func_navigation_notification(navigation);
-	navigation_stat = navigation;
-
-	return count;
+#define LIMIT_CHARGING_FILENODE_ATTR(_name)			\
+{								\
+	.attr = { .name = #_name, .mode = S_IWUSR | S_IWGRP },	\
+	.show = htc_battery_##_name##_stat,			\
+	.store = htc_battery_##_name##_switch,			\
 }
+
+LIMIT_CHARGING_FILENODE_FUNC(navigation, LIMIT_CHARGING_NAVIGATION)
+LIMIT_CHARGING_FILENODE_FUNC(medialink, LIMIT_CHARGING_MEDIALINK)
+LIMIT_CHARGING_FILENODE_FUNC(data_encryption, LIMIT_CHARGING_DATA_ENCRYPTION)
 
 static struct device_attribute htc_battery_attrs[] = {
 	HTC_BATTERY_ATTR(batt_id),
@@ -453,6 +479,7 @@ static struct device_attribute htc_battery_attrs[] = {
 
 	__ATTR(batt_attr_text, S_IRUGO, htc_battery_show_batt_attr, NULL),
 	__ATTR(batt_power_meter, S_IRUGO, htc_battery_show_batt_power_meter, NULL),
+	__ATTR(htc_extension, S_IRUGO, htc_battery_show_htc_extension_attr, NULL),
 };
 
 static struct device_attribute htc_set_delta_attrs[] = {
@@ -467,13 +494,21 @@ static struct device_attribute htc_set_delta_attrs[] = {
 		htc_battery_charger_ctrl_timer),
 	__ATTR(phone_call, S_IWUSR | S_IWGRP, htc_battery_phone_call_stat,
 		htc_battery_phone_call_switch),
-	__ATTR(navigation, S_IWUSR | S_IWGRP, htc_battery_navigation_stat,
-		htc_battery_navigation_switch),
+	LIMIT_CHARGING_FILENODE_ATTR(navigation),
+	LIMIT_CHARGING_FILENODE_ATTR(medialink),
+	LIMIT_CHARGING_FILENODE_ATTR(data_encryption),
+};
+
+
+static struct device_attribute htc_battery_rt_attrs[] = {
+	__ATTR(batt_vol_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
+	__ATTR(batt_current_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
+	__ATTR(batt_temp_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
 };
 
 static int htc_battery_create_attrs(struct device *dev)
 {
-	int i = 0, j = 0, rc = 0;
+	int i = 0, j = 0, k = 0, rc = 0;
 
 	for (i = 0; i < ARRAY_SIZE(htc_battery_attrs); i++) {
 		rc = device_create_file(dev, &htc_battery_attrs[i]);
@@ -487,14 +522,23 @@ static int htc_battery_create_attrs(struct device *dev)
 			goto htc_delta_attrs_failed;
 	}
 
+	for (k = 0; k < ARRAY_SIZE(htc_battery_rt_attrs); k++) {
+		rc = device_create_file(dev, &htc_battery_rt_attrs[k]);
+		if (rc)
+			goto htc_rt_attrs_failed;
+	}
+
 	goto succeed;
 
-htc_attrs_failed:
-	while (i--)
-		device_remove_file(dev, &htc_battery_attrs[i]);
+htc_rt_attrs_failed:
+	while (k--)
+		device_remove_file(dev, &htc_battery_rt_attrs[k]);
 htc_delta_attrs_failed:
 	while (j--)
 		device_remove_file(dev, &htc_set_delta_attrs[j]);
+htc_attrs_failed:
+	while (i--)
+		device_remove_file(dev, &htc_battery_attrs[i]);
 succeed:
 	return rc;
 }
@@ -606,7 +650,8 @@ static ssize_t htc_battery_show_property(struct device *dev,
 		break;
 	case BATT_CURRENT:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-				battery_core_info.rep.batt_current);
+				battery_core_info.rep.batt_current -
+				battery_core_info.rep.batt_discharg_current);
 		break;
 	case CHARGING_SOURCE:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
@@ -637,6 +682,30 @@ static ssize_t htc_battery_show_property(struct device *dev,
 		BATT_ERR("%s: battery: attribute is not supported: %d",
 			__func__, off);
 
+	return i;
+}
+
+static ssize_t htc_battery_rt_attr_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	int i = 0;
+	int val = 0;
+	int rc = 0;
+	const ptrdiff_t attr_index = attr - htc_battery_rt_attrs;
+
+	if (!battery_core_info.func.func_get_batt_rt_attr) {
+		BATT_ERR("%s: func_get_batt_rt_attr does not exist", __func__);
+		return -EINVAL;
+	}
+
+	rc = battery_core_info.func.func_get_batt_rt_attr(attr_index, &val);
+	if (rc) {
+		BATT_ERR("%s: get_batt_rt_attrs[%d] failed", __func__, attr_index);
+		return -EINVAL;
+	}
+
+	i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", val);
 	return i;
 }
 
@@ -865,12 +934,18 @@ int htc_battery_core_register(struct device *dev,
 
 	mutex_init(&battery_core_info.info_lock);
 
+	if (htc_battery->func_get_batt_rt_attr)
+		battery_core_info.func.func_get_batt_rt_attr =
+					htc_battery->func_get_batt_rt_attr;
 	if (htc_battery->func_show_batt_attr)
 		battery_core_info.func.func_show_batt_attr =
 					htc_battery->func_show_batt_attr;
 	if (htc_battery->func_show_batt_power_meter)
 		battery_core_info.func.func_show_batt_power_meter =
 					htc_battery->func_show_batt_power_meter;
+	if (htc_battery->func_show_htc_extension_attr)
+		battery_core_info.func.func_show_htc_extension_attr =
+					htc_battery->func_show_htc_extension_attr;
 	if (htc_battery->func_get_battery_info)
 		battery_core_info.func.func_get_battery_info =
 					htc_battery->func_get_battery_info;
@@ -886,9 +961,9 @@ int htc_battery_core_register(struct device *dev,
 		battery_core_info.func.func_phone_call_notification =
 					htc_battery->func_phone_call_notification;
 
-	if (htc_battery->func_navigation_notification)
-		battery_core_info.func.func_navigation_notification =
-					htc_battery->func_navigation_notification;
+	if (htc_battery->func_limit_charging_notification)
+		battery_core_info.func.func_limit_charging_notification =
+					htc_battery->func_limit_charging_notification;
 
 	/* init power supplier framework */
 	for (i = 0; i < ARRAY_SIZE(htc_power_supplies); i++) {
@@ -918,7 +993,7 @@ int htc_battery_core_register(struct device *dev,
 	battery_core_info.rep.batt_id = 1;
 	battery_core_info.rep.batt_vol = 4000;
 	battery_core_info.rep.batt_temp = 285;
-	battery_core_info.rep.batt_current = 162;
+	battery_core_info.rep.batt_current = 162000;
 	battery_core_info.rep.level = 66;
 	battery_core_info.rep.full_bat = 1580000;
 	battery_core_info.rep.full_level = 100;

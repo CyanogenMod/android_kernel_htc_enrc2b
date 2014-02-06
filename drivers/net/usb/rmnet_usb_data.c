@@ -290,10 +290,8 @@ static int rmnet_usb_suspend(struct usb_interface *iface, pm_message_t message)
 	retval = usbnet_suspend(iface, message);
 	if (!retval) {
 		if (message.event & PM_EVENT_SUSPEND) {
-			pr_info("%s :+usb_wait_anchor_empty_timeout\n", __func__);
 			time = usb_wait_anchor_empty_timeout(&dev->tx_submitted,
 								1000);
-			pr_info("%s :-usb_wait_anchor_empty_timeout\n", __func__);
 			if (!time)
 			{
 				pr_info("%s :+usb_kill_anchored_urbs\n", __func__);

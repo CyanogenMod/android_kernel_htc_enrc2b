@@ -258,8 +258,9 @@ static struct platform_tegra_pwm_backlight_data enrc2b_disp1_backlight_data = {
 	/* Only toggle backlight on fb blank notifications for disp1 */
 	.check_fb	= enrc2b_disp1_check_fb,
 	.backlight_status	= BACKLIGHT_ENABLE,
-	.dimming_enable	= true,
 	.cam_launch_bkl_value = 181,
+	.dimming_off_cmd = NULL,
+	.n_dimming_off_cmd = NULL,
 };
 
 static struct platform_device enrc2b_disp1_backlight_device = {
@@ -346,12 +347,14 @@ static struct resource enrc2b_disp2_resources[] = {
 		.end	= TEGRA_DISPLAY2_BASE + TEGRA_DISPLAY2_SIZE - 1,
 		.flags	= IORESOURCE_MEM,
 	},
+#if 0
 	{
 		.name	= "fbmem",
 		.flags	= IORESOURCE_MEM,
 		.start	= 0,
 		.end	= 0,
 	},
+#endif
 	{
 		.name	= "hdmi_regs",
 		.start	= TEGRA_HDMI_BASE,
@@ -613,6 +616,15 @@ static struct tegra_dsi_cmd nt_still_mode_cmd[] = {
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 };
 /*  --- -------------------------------------------  ---*/
+
+/* ----------  CABC cmd for dimming on/off  ------------ */
+static struct tegra_dsi_cmd dimming_on_cmd[] = {
+	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+};
+
+static u8 dimming_off_cmd[] = {0x53,0x24,0x51,0x00};
+
+/* ----------------------------------------------------- */
 
 /*initial command for sharp panel*/
 static u8 init_cmd[] = {0xB9,0xFF,0x83,0x92};
@@ -1160,7 +1172,7 @@ static struct tegra_dsi_cmd dsi_init_sony_nt_c1_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -1611,7 +1623,7 @@ static struct tegra_dsi_cmd dsi_init_sony_nt_c2_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -2077,7 +2089,7 @@ static struct tegra_dsi_cmd dsi_init_sharp_nt_c1_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -2522,7 +2534,7 @@ static struct tegra_dsi_cmd dsi_init_sharp_nt_c2_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -2973,7 +2985,7 @@ static struct tegra_dsi_cmd dsi_init_sharp_nt_c2_9a_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -4401,7 +4413,6 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(hx_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = hx_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = hx_still_mode_cmd;
-			enrc2b_disp1_backlight_data.dimming_enable = false;
 		break;
 		case PANEL_ID_SHARP_HX_C4:
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_hx_c4_cmd);
@@ -4409,7 +4420,6 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(hx_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = hx_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = hx_still_mode_cmd;
-			enrc2b_disp1_backlight_data.dimming_enable = false;
 		break;
 		case PANEL_ID_SHARP_HX_C5:
 		case PANEL_ID_SHARP_HX:
@@ -4418,7 +4428,6 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(hx_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = hx_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = hx_still_mode_cmd;
-			enrc2b_disp1_backlight_data.dimming_enable = false;
 		break;
 		case PANEL_ID_SONY_NT_C1:
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sony_nt_c1_cmd);
@@ -4431,6 +4440,10 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SONY_NT_C2:
 		case PANEL_ID_SONY:
@@ -4444,6 +4457,10 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP_NT_C1:
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c1_cmd);
@@ -4458,6 +4475,10 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP_NT_C2:
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c2_cmd);
@@ -4470,6 +4491,10 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP_NT_C2_9A:
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c2_9a_cmd);
@@ -4482,6 +4507,10 @@ int __init enrc2b_panel_init(void)
 			enrc2b_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			enrc2b_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			enrc2b_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			enrc2b_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			enrc2b_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			enrc2b_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			enrc2b_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP:
 			enrc2b_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_unknow_cmd);

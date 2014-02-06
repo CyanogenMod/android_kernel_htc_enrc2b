@@ -103,8 +103,7 @@ static void debug_putc(struct platform_device *pdev, unsigned int c)
 	while (!(tegra_read_lsr(t) & UART_LSR_THRE))
 		cpu_relax();
 
-	// tegra_write(t, c, UART_TX);
-	printk("%c", c);
+	tegra_write(t, c, UART_TX);
 }
 
 static void debug_flush(struct platform_device *pdev)

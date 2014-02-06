@@ -111,6 +111,8 @@ static int tegra_idle_enter_lp2(struct cpuidle_device *dev,
 	ktime_t enter, exit;
 	s64 us;
 
+	mf_irq_leave(NULL);
+
 	if (!lp2_in_idle || lp2_disabled_by_suspend ||
 	    !tegra_lp2_is_allowed(dev, state)) {
 		dev->last_state = &dev->states[0];
@@ -127,9 +129,6 @@ static int tegra_idle_enter_lp2(struct cpuidle_device *dev,
 	us = ktime_to_us(exit);
 
 	local_irq_enable();
-
-	/* cpu clockevents may have been reset by powerdown */
-	hrtimer_peek_ahead_timers();
 
 	smp_rmb();
 

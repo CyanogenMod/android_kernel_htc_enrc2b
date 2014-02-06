@@ -3,7 +3,7 @@
  *
  * Memory manager for Tegra GPU
  *
- * Copyright (c) 2009-2011, NVIDIA Corporation.
+ * Copyright (c) 2009-2012, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -44,7 +44,8 @@
 static void map_iovmm_area(struct nvmap_handle *h)
 {
 	tegra_iovmm_addr_t va;
-	unsigned long i;
+	unsigned long i, k;
+	static bool first_time = 1;
 
 	BUG_ON(!h->heap_pgalloc || !h->pgalloc.area);
 	BUG_ON(h->size & ~PAGE_MASK);
@@ -53,7 +54,19 @@ static void map_iovmm_area(struct nvmap_handle *h)
 	for (va = h->pgalloc.area->iovm_start, i = 0;
 	     va < (h->pgalloc.area->iovm_start + h->size);
 	     i++, va += PAGE_SIZE) {
-		BUG_ON(!pfn_valid(page_to_pfn(h->pgalloc.pages[i])));
+		if (unlikely(!pfn_valid(page_to_pfn(h->pgalloc.pages[i])))) {
+			pr_err("*****page_to_pfn error, pfn=0x%x, page=0x%x, ft=%d, i=%ld, heap_pgalloc=%d,"
+				" alloc=%d userflags=0x%x, size=%d, orig_size=%d, flags=0x%x",
+				page_to_pfn(h->pgalloc.pages[i]), h->pgalloc.pages[i],
+				first_time, i, h->heap_pgalloc,
+				h->alloc, h->userflags, h->size, h->orig_size, h->flags);
+			for (k = 0; k < (h->size/PAGE_SIZE); k++) {
+				pr_err("page[%d]=0x%x,pfn=0x%x",
+					k, h->pgalloc.pages[k], page_to_pfn(h->pgalloc.pages[k]));
+			}
+			BUG();
+		}
+		first_time = 0;
 		tegra_iovmm_vm_insert_pfn(h->pgalloc.area, va,
 					  page_to_pfn(h->pgalloc.pages[i]));
 	}
@@ -271,7 +284,7 @@ int nvmap_pin_ids(struct nvmap_client *client,
 	 * if the caller crashes after pinning a global handle, the handle
 	 * will be permanently leaked. */
 	nvmap_ref_lock(client);
-	for (i = 0; i < nr && !ret; i++) {
+	for (i = 0; i < nr; i++) {
 		ref = _nvmap_validate_id_locked(client, ids[i]);
 		if (ref) {
 			atomic_inc(&ref->pin);
@@ -280,18 +293,18 @@ int nvmap_pin_ids(struct nvmap_client *client,
 			struct nvmap_handle *verify;
 			nvmap_ref_unlock(client);
 			verify = nvmap_validate_get(client, ids[i]);
-			if (verify)
+			if (verify) {
 				nvmap_warn(client, "%s pinning unreferenced "
 					   "handle %p\n",
 					   current->group_leader->comm, h[i]);
-			else
+			} else {
+				h[i] = NULL;
 				ret = -EPERM;
+			}
 			nvmap_ref_lock(client);
 		}
 	}
 	nvmap_ref_unlock(client);
-
-	nr = i;
 
 	if (ret)
 		goto out;
@@ -317,6 +330,9 @@ out:
 	if (ret) {
 		nvmap_ref_lock(client);
 		for (i = 0; i < nr; i++) {
+			if(!ids[i])
+				continue;
+
 			ref = _nvmap_validate_id_locked(client, ids[i]);
 			if (!ref) {
 				nvmap_warn(client, "%s freed handle %p "
@@ -330,7 +346,8 @@ out:
 		nvmap_ref_unlock(client);
 
 		for (i = 0; i < nr; i++)
-			nvmap_handle_put(h[i]);
+			if(h[i])
+				nvmap_handle_put(h[i]);
 	}
 
 	return ret;

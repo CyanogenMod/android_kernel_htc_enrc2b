@@ -737,7 +737,7 @@ module_param(bthp_debounce_time_up, uint, 0644);
 static unsigned int bthp_debounce_time_down = 100000000; /* 100 ms */
 module_param(bthp_debounce_time_down, uint, 0644);
 
-static unsigned int bthp_debounce_time_lp = 0; /* disabled by default, in ms */
+static unsigned int bthp_debounce_time_lp = 200000000; /* 200 ms */
 module_param(bthp_debounce_time_lp, uint, 0644);
 
 static unsigned int bthp_relax = 0; /* relieve aggregated BTHP eval. */
@@ -2120,7 +2120,7 @@ struct early_suspend tegra_cpufreq_performance_early_suspender;
 static struct pm_qos_request_list boost_cpu_freq_req;
 static struct pm_qos_request_list cap_cpu_freq_req;
 #define BOOST_CPU_FREQ_MIN 1700000
-#define CAP_CPU_FREQ_MAX 475000
+#define CAP_CPU_FREQ_MAX 910000
 #endif
 static int enter_early_suspend = 0;
 static int perf_early_suspend = 0;

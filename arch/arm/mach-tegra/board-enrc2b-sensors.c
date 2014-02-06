@@ -269,7 +269,6 @@ static void config_nfc_gpios(void)
     }
     tegra_gpio_enable(RUBY_GPIO_NFC_INT);
 
-    gpio_set_value(RUBY_GPIO_NFC_VEN, 1);
     pr_info("%s\n", __func__);
 
 }
@@ -625,22 +624,34 @@ struct enrc2b_battery_gpio {
 		.label = _label,		\
 	}
 
-struct enrc2b_battery_gpio enrc2b_battery_gpio_data[] ={
-	[0] = TEGRA_BATTERY_GPIO(TEGRA_GPIO_PJ0, "mbat_in"),
-};
-
-static struct htc_battery_platform_data htc_battery_pdev_data = {
-	.gpio_mbat_in = 0,
+static struct htc_battery_platform_data __initdata htc_battery_pdev_data = {
+	.gpio_mbat_in = -1,
 	.gpio_mbat_in_trigger_level = MBAT_IN_LOW_TRIGGER,
 	.guage_driver = GUAGE_TPS80032,
 	.charger = SWITCH_CHARGER_TPS80032,
 	.vzero_clb_channel = -1,
 	.volt_adc_offset = 0,
 	.power_off_by_id = 0,
-	.sw_temp_25 = TEGRA_GPIO_INVALID,
+	.sw_temp_25 = TEGRA_GPIO_PU1,
+	.adc2temp_map = {{  22,  2918},
+			 { 989,   680},
+			 {1182,   600},
+			 {1231,   581},
+			 {1500,   480},
+			 {1582,   450},
+			 {1660,   420},
+			 {1844,   350},
+			 {2076,   250},
+			 {2263,   151},
+			 {2339,   100},
+			 {2401,    51},
+			 {2453,     1},
+			 {2572,  -203},
+			 {2620,  -529},
+			},
 };
 
-static struct platform_device htc_battery_pdev = {
+static struct platform_device __initdata htc_battery_pdev = {
 	.name	= "htc_battery",
 	.id	= -1,
 	.dev	= {
@@ -648,50 +659,20 @@ static struct platform_device htc_battery_pdev = {
 	},
 };
 
-#define TMUS_SKUID_BATT	0x00032900
+#if 1	/* fixme: for MFG build to disable mbat_in check */
+static int __init check_mbat_in_tag(char *get_mbat_in)
+{
+	if (strlen(get_mbat_in) && !strcmp(get_mbat_in, "false")) {
+		htc_battery_pdev_data.power_off_by_id = 0;
+	}
+	return 1;
+}
+__setup("mbat_in_check=", check_mbat_in_tag);
+#endif
+
 static void enrc2b_battery_init(void)
 {
-	int ret;
-	int i;
-
-	int project_phase = htc_get_pcbid_info();
-	unsigned int skuid = board_get_sku_tag();
-
-	if (skuid == TMUS_SKUID_BATT && project_phase == PROJECT_PHASE_XA) {
-		htc_battery_pdev_data.gpio_mbat_in = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PJ0);
-		for (i = 0; i < ARRAY_SIZE(enrc2b_battery_gpio_data); i++) {
-			ret = gpio_request(enrc2b_battery_gpio_data[i].gpio,
-					enrc2b_battery_gpio_data[i].label);
-			if (ret < 0) {
-				pr_err("%s: gpio_request failed for gpio #%d\n",
-						__func__, i);
-				goto bat_fail_free_gpio;
-			}
-
-			ret = gpio_direction_input(enrc2b_battery_gpio_data[i].gpio);
-			if (ret < 0) {
-				pr_err("%s: gpio_direction_input failed for gpio #%d\n",
-						__func__, i);
-				goto bat_fail_free_gpio;
-			}
-
-			tegra_gpio_enable(enrc2b_battery_gpio_data[i].gpio);
-		}
-	}
-
-	if (skuid != TMUS_SKUID_BATT || project_phase >= PROJECT_PHASE_XB)
-		htc_battery_pdev_data.sw_temp_25 = TEGRA_GPIO_PU1;
-
 	platform_device_register(&htc_battery_pdev);
-
-	return;
-
-bat_fail_free_gpio:
-	if (skuid == TMUS_SKUID_BATT && project_phase == PROJECT_PHASE_XA) {
-		pr_err("%s enrc2b_battery_init failed!\n", __func__);
-		while (i--)
-			gpio_free(enrc2b_battery_gpio_data[i].gpio);
-	}
 }
 
 #ifdef CONFIG_SENSORS_INA230

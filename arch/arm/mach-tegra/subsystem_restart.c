@@ -130,6 +130,18 @@ int get_restart_level()
 }
 EXPORT_SYMBOL(get_restart_level);
 
+int get_enable_ramdumps()
+{
+	return enable_ramdumps;
+}
+EXPORT_SYMBOL(get_enable_ramdumps);
+
+void set_enable_ramdumps(int en)
+{
+	enable_ramdumps = en;
+}
+EXPORT_SYMBOL(set_enable_ramdumps);
+
 static void restart_level_changed(void)
 {
 	struct subsys_data *subsys;

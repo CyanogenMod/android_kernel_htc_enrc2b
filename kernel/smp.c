@@ -13,6 +13,8 @@
 #include <linux/smp.h>
 #include <linux/cpu.h>
 
+#include <mach/mfootprint.h>
+
 #ifdef CONFIG_USE_GENERIC_SMP_HELPERS
 static struct {
 	struct list_head	queue;
@@ -156,7 +158,10 @@ void generic_exec_single(int cpu, struct call_single_data *data, int wait)
 	 * locking and barrier primitives. Generic code isn't really
 	 * equipped to do the right thing...
 	 */
-	if (ipi)
+
+	smp_mb();
+
+	if (ipi || wait)
 		arch_send_call_function_single_ipi(cpu);
 
 	if (wait)
@@ -212,7 +217,9 @@ void generic_smp_call_function_interrupt(void)
 			continue;
 
 		func = data->csd.func;		/* save for later warn */
+		mf_int_enter(func);
 		func(data->csd.info);
+		mf_int_leave(func);
 
 		/*
 		 * If the cpu mask is not still set then func enabled
@@ -274,7 +281,9 @@ void generic_smp_call_function_single_interrupt(void)
 		 */
 		data_flags = data->flags;
 
+		mf_int_enter(data->func);
 		data->func(data->info);
+		mf_int_leave(data->func);
 
 		/*
 		 * Unlocked CSDs are valid through generic_exec_single():

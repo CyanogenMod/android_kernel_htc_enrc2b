@@ -608,6 +608,11 @@ wl_cfgp2p_init_discovery(struct wl_priv *wl)
  * @wl        : wl_private data
  * Returns 0 if succes
  */
+
+//2013-03-26 Hugh Add ++++
+extern int turn_on_conap;
+//2013-03-26 Hugh Add ----
+
 static s32
 wl_cfgp2p_deinit_discovery(struct wl_priv *wl)
 {
@@ -632,7 +637,22 @@ wl_cfgp2p_deinit_discovery(struct wl_priv *wl)
 	/* Clear the saved bsscfg index of the discovery BSSCFG to indicate we
 	 * have no discovery BSS.
 	 */
-	wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE) = 0;
+
+//2013-03-26 Hugh Add ++++
+ 	CFGP2P_DBG(("wl_to_p2p_bss_ndev(wl, P2PAPI_BSSCFG_PRIMARY)-->dev[%p]" 
+ 	             "wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE)-->bssidx[%d]",
+	                wl_to_p2p_bss_ndev(wl, P2PAPI_BSSCFG_PRIMARY),wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE)));
+
+	if(turn_on_conap){	 
+		wl_cfgp2p_clear_management_ie(wl, wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE));
+		wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE) = 0;
+		turn_on_conap = 0;
+	}	
+	else{
+		wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE) = WL_INVALID;
+	}
+//	wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE) = 0;
+//2013-03-26 Hugh Add ----
 	wl_to_p2p_bss_ndev(wl, P2PAPI_BSSCFG_DEVICE) = NULL;
 
 	return ret;
@@ -695,7 +715,13 @@ wl_cfgp2p_disable_discovery(struct wl_priv *wl)
 {
 	s32 ret = BCME_OK;
 	CFGP2P_DBG((" enter\n"));
-	wl_clr_p2p_status(wl, DISCOVERY_ON);
+//	wl_clr_p2p_status(wl, DISCOVERY_ON);
+
+    if (!wl->p2p) {
+		WL_ERR(("wl->p2p is not initialized\n"));
+		ret = BCME_ERROR;
+		goto exit;
+	}
 
 	if (wl_to_p2p_bss_bssidx(wl, P2PAPI_BSSCFG_DEVICE) == 0) {
 		CFGP2P_ERR((" do nothing, not initialized\n"));
@@ -718,6 +744,7 @@ wl_cfgp2p_disable_discovery(struct wl_priv *wl)
 	}
 #endif
 	wl_clr_p2p_status(wl, DISCOVERY_ON);
+	wl->p2p->status = 0;
 	ret = wl_cfgp2p_deinit_discovery(wl);
 
 exit:

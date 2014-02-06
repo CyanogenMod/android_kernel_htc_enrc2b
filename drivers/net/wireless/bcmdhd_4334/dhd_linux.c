@@ -673,8 +673,8 @@ extern char gatewaybuf[8+1]; //HTC_KlocWork
 char ip_str[32];
 bool hasDLNA = false;
 bool allowMulticast = false;
-int dhd_set_keepalive(int value);
 #endif
+int dhd_set_keepalive(int value);
 extern int wl_pattern_atoh(char *src, char *dst);
 int is_screen_off = 0;
 /* HTC_CSP_END */
@@ -684,8 +684,8 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 /* HTC_CSP_START */
 #ifdef BCM4329_LOW_POWER
 	int ignore_bcmc = 1;
-	char iovbuf[32];
 #endif
+	char iovbuf[32];
 /* HTC_CSP_END */
 
 #ifdef CUSTOMER_HW2
@@ -822,7 +822,6 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 	return 0;
 }
 /* HTC_CSP_START */
-#ifdef BCM4329_LOW_POWER
 int dhd_set_keepalive(int value)
 {
     char *str;
@@ -843,7 +842,7 @@ int dhd_set_keepalive(int value)
     buf_len = str_len + 1;
     keep_alive_pktp = (wl_keep_alive_pkt_t *) (buf + str_len + 1);
 
-	keep_alive_pkt.period_msec = htod32(60000); // Default 60s NULL keepalive packet
+	keep_alive_pkt.period_msec = htod32(30000); // Default 30s NULL keepalive packet
 	/* Setup keep alive zero for null packet generation */
 	keep_alive_pkt.len_bytes = 0;
 	buf_len += WL_KEEP_ALIVE_FIXED_LEN;
@@ -859,7 +858,6 @@ int dhd_set_keepalive(int value)
 
     return 0;
 }
-#endif
 
 /* bitmask, bit value: 1 - enable, 0 - disable
  */
@@ -884,14 +882,16 @@ int dhdhtc_update_wifi_power_mode(int is_screen_off)
 		pm_type = PM_OFF;
 		dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&pm_type, sizeof(pm_type), TRUE, 0);
 	}  else if  (dhdcdc_power_active_while_plugin && usb_get_connect_type()) {
-		printf("power active. usb_type:%d\n", usb_get_connect_type());
-		pm_type = PM_OFF;
+		printf("update pm: PM_FAST. usb_type:%d\n", usb_get_connect_type());
+		pm_type = PM_FAST;
 		dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&pm_type, sizeof(pm_type), TRUE, 0);
 	} else {
+		/*
 		if (is_screen_off && !dhdcdc_wifiLock)
 			pm_type = PM_MAX;
 		else
-			pm_type = PM_FAST;
+		*/
+		pm_type = PM_FAST;
 		printf("update pm: %s, wifiLock: %d\n", pm_type==1?"PM_MAX":"PM_FAST", dhdcdc_wifiLock);
 		dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&pm_type, sizeof(pm_type), TRUE, 0);
 	}
@@ -1557,9 +1557,11 @@ _dhd_sysioc_thread(void *data)
 	unsigned long flags;
 #endif
 
+#ifndef USE_KTHREAD_API
 	DAEMONIZE("dhd_sysioc");
 
 	complete(&tsk->completed);
+#endif
 
 	while (down_interruptible(&tsk->sema) == 0) {
 #ifdef MCAST_LIST_ACCUMULATION
@@ -1829,7 +1831,7 @@ dhd_start_xmit(struct sk_buff *skb, struct net_device *net)
 			__FUNCTION__, dhd->pub.up, dhd->pub.busstate));
 		netif_stop_queue(net);
 /* HTC_CSP_START */
-		dev_kfree_skb(skb);
+		//dev_kfree_skb(skb);
 /* HTC_CSP_END */
 		/* Send Event when bus down detected during data session */
 		if (dhd->pub.up) {
@@ -2371,10 +2373,12 @@ dhd_watchdog_thread(void *data)
 		setScheduler(current, SCHED_FIFO, &param);
 	}
 
+#ifndef USE_KTHREAD_API
 	DAEMONIZE("dhd_watchdog");
 
 	/* Run until signal received */
 	complete(&tsk->completed);
+#endif
 
 	while (1)
 		if (down_interruptible (&tsk->sema) == 0) {
@@ -2484,11 +2488,13 @@ dhd_dpc_thread(void *data)
 		setScheduler(current, SCHED_FIFO, &param);
 	}
 
+#ifndef USE_KTHREAD_API
 	DAEMONIZE("dhd_dpc");
 	/* DHD_OS_WAKE_LOCK is called in dhd_sched_dpc[dhd_linux.c] down below  */
 
 	/*  signal: thread has started */
 	complete(&tsk->completed);
+#endif
 
 	/* Run until signal received */
 	while (1) {
@@ -3371,7 +3377,9 @@ dhd_osl_detach(osl_t *osh)
 	dhd_registration_check = FALSE;
 	up(&dhd_registration_sem);
 #if	defined(BCMLXSDMMC)
+#if 0
 	up(&dhd_chipup_sem);
+#endif
 #endif
 #endif 
 }
@@ -3669,7 +3677,12 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
     
 	if (dhd_dpc_prio >= 0) {
 		/* Initialize watchdog thread */
+#ifdef USE_KTHREAD_API
+		printf("%s: Initialize watchdog thread\n",__func__);
+		PROC_START2(dhd_watchdog_thread, dhd, &dhd->thr_wdt_ctl, 0, "dhd_watchdog_thread");
+#else
 		PROC_START(dhd_watchdog_thread, dhd, &dhd->thr_wdt_ctl, 0);
+#endif
 	} else {
 		dhd->thr_wdt_ctl.thr_pid = -1;
 	}
@@ -3677,7 +3690,12 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	/* Set up the bottom half handler */
 	if (dhd_dpc_prio >= 0) {
 		/* Initialize DPC thread */
+#ifdef USE_KTHREAD_API
+		printf("%s: Initialize DPC thread\n",__func__);
+		PROC_START2(dhd_dpc_thread, dhd, &dhd->thr_dpc_ctl, 0, "dhd_dpc");
+#else
 		PROC_START(dhd_dpc_thread, dhd, &dhd->thr_dpc_ctl, 0);
+#endif
 	} else {
 		/*  use tasklet for dpc */
 		tasklet_init(&dhd->tasklet, dhd_dpc, (ulong)dhd);
@@ -3690,7 +3708,12 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 #endif /* DHDTHREAD */
 
 	if (dhd_sysioc) {
+#ifdef USE_KTHREAD_API
+		printf("%s: Initialize sysioc thread\n",__func__);
+		PROC_START2(_dhd_sysioc_thread, dhd, &dhd->thr_sysioc_ctl, 0, "dhd_sysioc");
+#else
 		PROC_START(_dhd_sysioc_thread, dhd, &dhd->thr_sysioc_ctl, 0);
+#endif
 	} else {
 		dhd->thr_sysioc_ctl.thr_pid = -1;
 	}
@@ -3957,6 +3980,11 @@ dhd_concurrent_fw(dhd_pub_t *dhd)
 #endif /* WL_ENABLE_P2P_IF */
 }
 #endif 
+
+/* HTC_WIFI_START*/
+extern int get_tamper_sf(void);
+/* HTC_WIFI_END */
+
 int
 dhd_preinit_ioctls(dhd_pub_t *dhd)
 {
@@ -3971,7 +3999,7 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	uint32 dongle_align = DHD_SDALIGN;
 	uint32 glom = CUSTOM_GLOM_SETTING;
 	uint32 txlazydelay = 0;
-	uint32 lvtrigtime = 6;
+	//uint32 lvtrigtime = 6;
 #if defined(VSDB) || defined(ROAM_ENABLE)
 	uint bcn_timeout = 8;
 #else
@@ -4147,11 +4175,16 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 #endif
 	}
 
-	DHD_ERROR(("Firmware up: op_mode=%d, "
+	/* only print out mac addr when S-off */
+	if (get_tamper_sf() == 0)
+		DHD_ERROR(("Firmware up: op_mode=%d, "
 			"Broadcom Dongle Host Driver mac=%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",
 			dhd->op_mode,
 			dhd->mac.octet[0], dhd->mac.octet[1], dhd->mac.octet[2],
 			dhd->mac.octet[3], dhd->mac.octet[4], dhd->mac.octet[5]));
+	else
+		DHD_ERROR(("Firmware up: op_mode=%d, Broadcom Dongle Host Driver\n",
+			dhd->op_mode));
 
 	/* Set Country code  */
 	if (dhd->dhd_cspec.ccode[0] != 0) {
@@ -4204,9 +4237,11 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 	bcm_mkiovar("bus:txlazydelay", (char *)&txlazydelay, 4, iovbuf, sizeof(iovbuf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
 
+#if 0
 	/* change lvtrigtime to 6 */
 	bcm_mkiovar("bus:lvtrigtime", (char *)&lvtrigtime, 4, iovbuf, sizeof(iovbuf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+#endif
 
 	/* Setup timeout if Beacons are lost and roam is off to report link down */
 	bcm_mkiovar("bcn_timeout", (char *)&bcn_timeout, 4, iovbuf, sizeof(iovbuf));
@@ -4358,6 +4393,9 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 	//setbit(eventmask, WLC_E_ASSOCREQ_IE);
 /* HTC_CSP_START */
 	setbit(eventmask, WLC_E_LOAD_IND);
+#if defined(HTC_TX_TRACKING)
+	setbit(eventmask, WLC_E_TX_STAT_ERROR);
+#endif
 /* HTC_CSP_END */
 #ifdef WL_CFG80211
 	setbit(eventmask, WLC_E_ESCAN_RESULT);
@@ -4470,6 +4508,29 @@ int ht_wsec_restrict = WLC_HT_TKIP_RESTRICT | WLC_HT_WEP_RESTRICT;
 	ret = 1;
 	bcm_mkiovar("tc_enable", (char *)&ret, 4, iovbuf, sizeof(iovbuf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+//HTC_CSP_START
+#if defined(HTC_TX_TRACKING)
+{
+		/* tx stat check, if (txerr/(txframe+txerr) > tx_stat_chk_ratio, send up event */
+		uint tx_stat_chk = 0; /* disable tx status check */
+		uint tx_stat_chk_prd = 5; /* check period 5 seconds */
+		uint tx_stat_chk_ratio = 8; /* check fail rate >= 80% */
+		uint tx_stat_chk_num = 5; /* check only if there is more than 5 packet send out in check period */
+
+		bcm_mkiovar("tx_stat_chk_num", (char *)&tx_stat_chk_num, 4, iovbuf, sizeof(iovbuf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+
+		bcm_mkiovar("tx_stat_chk_ratio", (char *)&tx_stat_chk_ratio, 4, iovbuf, sizeof(iovbuf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+
+		bcm_mkiovar("tx_stat_chk_prd", (char *)&tx_stat_chk_prd, 4, iovbuf, sizeof(iovbuf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+
+		bcm_mkiovar("tx_stat_chk", (char *)&tx_stat_chk, 4, iovbuf, sizeof(iovbuf));
+		dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, iovbuf, sizeof(iovbuf), TRUE, 0);
+}
+#endif
+//HTC_CSP_END
 
 	/* set srl and lrl */
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_SRL, (char *)&srl, sizeof(srl), TRUE, 0);
@@ -5848,6 +5909,8 @@ static void dhd_hang_process(struct work_struct *work)
 {
 	dhd_info_t *dhd;
 	struct net_device *dev;
+	int ret;
+	s32 updown = 0;
 
 	dhd = (dhd_info_t *)container_of(work, dhd_info_t, work_hang);
 	dev = dhd->iflist[0]->net;
@@ -5856,6 +5919,10 @@ static void dhd_hang_process(struct work_struct *work)
 		//rtnl_lock();
 		//dev_close(dev);
 		//rtnl_unlock();
+		printf(" %s before send hang messages, do wlc down to prevent get additional event from firmware\n",__FUNCTION__);
+		if ((ret = wldev_ioctl(dev, WLC_DOWN, &updown, sizeof(s32), false))) {
+			WL_ERR(("fail to set wlc down"));
+		}
 #if defined(WL_WIRELESS_EXT)
 		wl_iw_send_priv_event(dev, "HANG");
 #endif

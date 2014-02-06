@@ -303,6 +303,7 @@ struct s5k3h2yx_platform_data enrc2b_s5k3h2yx_data =
 	.rawchip_need_powercycle = 1,
 	.mirror_flip = 0,
 	.use_rawchip = RAWCHIP_ENABLE,
+	.hardware = 1,
 };
 
 struct ov8838_platform_data enrc2b_ov8838_data =

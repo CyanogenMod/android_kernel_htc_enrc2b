@@ -1133,10 +1133,10 @@ void tegra_auto_hotplug_governor(unsigned int cpu_freq, bool suspend)
 		bottom_freq = idle_bottom_freq;
 
 #if defined(CONFIG_BEST_TRADE_HOTPLUG)
-        if (likely(bthp_en)) {
-            bthp_cpuup_standalone (cpu_freq);
-            return;
-        }
+	        if (likely(bthp_en)) {
+			bthp_cpuup_standalone (cpu_freq);
+			return;
+	        }
 #endif
 	}
 
@@ -1383,7 +1383,7 @@ static struct kernel_param_ops bthp_ctrl_ops = {
 	.set = bthp_ctrl_set,
 	.get = bthp_ctrl_get,
 };
-module_param_cb(bthp_en, &bthp_ctrl_ops, &bthp_en, 0664);
+module_param_cb(bthp_en, &bthp_ctrl_ops, &bthp_en, 0444);
 
 /* controller for activity trigger */
 static bool at_en = 1;

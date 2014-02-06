@@ -77,6 +77,8 @@ static struct regulator *evitareul_hdmi_pll = NULL;
 static struct regulator *evitareul_hdmi_vddio = NULL;
 #endif
 
+#define LCM_ID0 	TEGRA_GPIO_PM0
+#define LCM_ID1 	TEGRA_GPIO_PM1
 #define LCM_TE		TEGRA_GPIO_PJ1
 #define LCM_PWM 	TEGRA_GPIO_PW1
 #define LCM_RST 	TEGRA_GPIO_PN6
@@ -257,8 +259,9 @@ static struct platform_tegra_pwm_backlight_data evitareul_disp1_backlight_data =
 	/* Only toggle backlight on fb blank notifications for disp1 */
 	.check_fb	= evitareul_disp1_check_fb,
 	.backlight_status	= BACKLIGHT_ENABLE,
-	.dimming_enable	= true,
 	.cam_launch_bkl_value = 181,
+	.dimming_off_cmd = NULL,
+	.n_dimming_off_cmd = NULL,
 };
 
 static struct platform_device evitareul_disp1_backlight_device = {
@@ -345,12 +348,14 @@ static struct resource evitareul_disp2_resources[] = {
 		.end	= TEGRA_DISPLAY2_BASE + TEGRA_DISPLAY2_SIZE - 1,
 		.flags	= IORESOURCE_MEM,
 	},
+#if 0
 	{
 		.name	= "fbmem",
 		.flags	= IORESOURCE_MEM,
 		.start	= 0,
 		.end	= 0,
 	},
+#endif
 	{
 		.name	= "hdmi_regs",
 		.start	= TEGRA_HDMI_BASE,
@@ -418,8 +423,13 @@ static int bridge_reset(void)
 	/*TODO delay for DSI hardware stable*/
 	hr_msleep(10);
 
-	/*change LCM_TE to SFIO(NP) & LCM_PWM to SFIO*/
+	/*change LCM_TE to SFIO(NP) & LCM_PWM to SFIO
+	 *set LCM_ID0 and ID1 to I(NP)*/
 	//tegra_gpio_disable(LCM_PWM);
+	gpio_direction_input(LCM_ID0);
+	gpio_direction_input(LCM_ID1);
+	tegra_pinmux_set_pullupdown(gpio_to_pingroup[LCM_ID0],  TEGRA_PUPD_NORMAL);
+	tegra_pinmux_set_pullupdown(gpio_to_pingroup[LCM_ID1],  TEGRA_PUPD_NORMAL);
 	tegra_pinmux_set_pullupdown(gpio_to_pingroup[LCM_TE],  TEGRA_PUPD_NORMAL);
 	tegra_gpio_disable(LCM_TE);
 
@@ -514,8 +524,11 @@ static int evitareul_dsi_panel_disable(void)
 	REGULATOR_GET(evitareul_dsi_reg, "avdd_dsi_csi");
 	regulator_disable(evitareul_dsi_reg);
 
-	/*change LCM_TE to GPIO I(PD) & LCM_PWM to GPIO*/
+	/*change LCM_TE to GPIO I(PD) & LCM_PWM to GPIO
+	 *set LCM_ID0 and ID1 to O(L)*/
 	//tegra_gpio_enable(LCM_PWM);
+	gpio_direction_output(LCM_ID0, 0);
+	gpio_direction_output(LCM_ID1, 0);
 	tegra_gpio_enable(LCM_TE);
 	tegra_pinmux_set_pullupdown(gpio_to_pingroup[LCM_TE],  TEGRA_PUPD_PULL_DOWN);
 
@@ -612,6 +625,15 @@ static struct tegra_dsi_cmd nt_still_mode_cmd[] = {
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 };
 /*  --- -------------------------------------------  ---*/
+
+/* ----------  CABC cmd for dimming on/off  ------------ */
+static struct tegra_dsi_cmd dimming_on_cmd[] = {
+	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+};
+
+static u8 dimming_off_cmd[] = {0x53,0x24,0x51,0x00};
+
+/* ----------------------------------------------------- */
 
 /*initial command for sharp panel*/
 static u8 init_cmd[] = {0xB9,0xFF,0x83,0x92};
@@ -1159,7 +1181,7 @@ static struct tegra_dsi_cmd dsi_init_sony_nt_c1_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -1610,7 +1632,7 @@ static struct tegra_dsi_cmd dsi_init_sony_nt_c2_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -2076,7 +2098,7 @@ static struct tegra_dsi_cmd dsi_init_sharp_nt_c1_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -2521,7 +2543,7 @@ static struct tegra_dsi_cmd dsi_init_sharp_nt_c2_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -2972,7 +2994,7 @@ static struct tegra_dsi_cmd dsi_init_sharp_nt_c2_9a_cmd[]= {
 	DSI_CMD_SHORT(0x15, 0x2A, 0xB7),
 	DSI_CMD_SHORT(0x15, 0xFF, 0x00),
 
-	DSI_CMD_SHORT(0x15, 0x53, 0x2C),
+	DSI_CMD_SHORT(0x15, 0x53, 0x24),
 	DSI_CMD_SHORT(0x15, 0x55, 0x83),
 	DSI_CMD_SHORT(0x15, 0x5E, 0x06),
 };
@@ -4363,7 +4385,6 @@ int __init evitareul_panel_init(void)
 			evitareul_dsi.n_cabc_cmd = ARRAY_SIZE(hx_moving_mode_cmd);
 			evitareul_dsi.dsi_cabc_moving_mode = hx_moving_mode_cmd;
 			evitareul_dsi.dsi_cabc_still_mode = hx_still_mode_cmd;
-			evitareul_disp1_backlight_data.dimming_enable = false;
 		break;
 		case PANEL_ID_SHARP_HX_C4:
 			evitareul_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_hx_c4_cmd);
@@ -4371,7 +4392,6 @@ int __init evitareul_panel_init(void)
 			evitareul_dsi.n_cabc_cmd = ARRAY_SIZE(hx_moving_mode_cmd);
 			evitareul_dsi.dsi_cabc_moving_mode = hx_moving_mode_cmd;
 			evitareul_dsi.dsi_cabc_still_mode = hx_still_mode_cmd;
-			evitareul_disp1_backlight_data.dimming_enable = false;
 		break;
 		case PANEL_ID_SHARP_HX_C5:
 		case PANEL_ID_SHARP_HX:
@@ -4380,7 +4400,6 @@ int __init evitareul_panel_init(void)
 			evitareul_dsi.n_cabc_cmd = ARRAY_SIZE(hx_moving_mode_cmd);
 			evitareul_dsi.dsi_cabc_moving_mode = hx_moving_mode_cmd;
 			evitareul_dsi.dsi_cabc_still_mode = hx_still_mode_cmd;
-			evitareul_disp1_backlight_data.dimming_enable = false;
 		break;
 		case PANEL_ID_SONY_NT_C1:
 			evitareul_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sony_nt_c1_cmd);
@@ -4393,6 +4412,10 @@ int __init evitareul_panel_init(void)
 			evitareul_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			evitareul_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			evitareul_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			evitareul_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			evitareul_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			evitareul_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			evitareul_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SONY_NT_C2:
 		case PANEL_ID_SONY:
@@ -4406,6 +4429,10 @@ int __init evitareul_panel_init(void)
 			evitareul_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			evitareul_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			evitareul_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			evitareul_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			evitareul_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			evitareul_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			evitareul_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP_NT_C1:
 			evitareul_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c1_cmd);
@@ -4420,6 +4447,10 @@ int __init evitareul_panel_init(void)
 			evitareul_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			evitareul_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			evitareul_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			evitareul_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			evitareul_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			evitareul_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			evitareul_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP_NT_C2:
 			evitareul_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c2_cmd);
@@ -4432,6 +4463,10 @@ int __init evitareul_panel_init(void)
 			evitareul_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			evitareul_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			evitareul_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			evitareul_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			evitareul_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			evitareul_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			evitareul_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP_NT_C2_9A:
 			evitareul_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_nt_c2_9a_cmd);
@@ -4444,6 +4479,10 @@ int __init evitareul_panel_init(void)
 			evitareul_dsi.n_cabc_cmd = ARRAY_SIZE(nt_moving_mode_cmd);
 			evitareul_dsi.dsi_cabc_moving_mode = nt_moving_mode_cmd;
 			evitareul_dsi.dsi_cabc_still_mode = nt_still_mode_cmd;
+			evitareul_dsi.n_cabc_dimming_on_cmd = ARRAY_SIZE(dimming_on_cmd);
+			evitareul_dsi.dsi_cabc_dimming_on_cmd = dimming_on_cmd;
+			evitareul_disp1_backlight_data.dimming_off_cmd = dimming_off_cmd;
+			evitareul_disp1_backlight_data.n_dimming_off_cmd = ARRAY_SIZE(dimming_off_cmd);
 		break;
 		case PANEL_ID_SHARP:
 			evitareul_dsi.n_init_cmd = ARRAY_SIZE(dsi_init_sharp_unknow_cmd);

@@ -1006,23 +1006,21 @@ static irqreturn_t bluesleep_hostwake_isr(int irq, void *dev)
 
 	if (t->host_wakeup_level == 0) { /* host_wake is high */
 
-#ifdef BCM_BT_DEBUG
-		dev_info(t->uport.dev, "[SER_BRCM]-- CHIP HOST_WAKE=HIGH\n");
-#endif
+		dev_info(t->uport.dev, "[SER_BRCM]-- CHIP HOST_WAKE=HIGH --\n");
 		t->host_wakeup_level = 1;
 
 		/* release rx wake lock */
 		if (t->is_brcm_rx_wake_locked == 1) {
+#ifdef BCM_BT_DEBUG
 			dev_info(t->uport.dev, "[SER_BRCM]release brcm_rx_wake_lock\n");
+#endif
 			wake_unlock(&t->brcm_rx_wake_lock);
 			t->is_brcm_rx_wake_locked = 0;
 		}
 		irq_set_irq_type(t->wakeup_irq, IRQF_TRIGGER_LOW);
 	} else {	/* host_wake is low */
 
-#ifdef BCM_BT_DEBUG
-		dev_info(t->uport.dev, "[SER_BRCM]-- CHIP HOST_WAKE=LOW\n");
-#endif
+		dev_info(t->uport.dev, "[SER_BRCM]-- CHIP HOST_WAKE=LOW --\n");
 
 		/* aquire rx wake lock */
 		if (t->is_brcm_rx_wake_locked == 0) {
@@ -1685,7 +1683,7 @@ static int tegra_ioctl(struct uart_port *u, unsigned int cmd, unsigned long arg)
 				gpio_set_value(tegra_uport->bt_wakeup_pin, T_LOW);
 				tegra_uport->bt_wakeup_level = 0;
 				tegra_uport->host_want_sleep = 0;
-				dev_info(u->dev, "[BT]-- HOST BT_WAKE=LOW --\n");
+				dev_info(u->dev, "[SER_BRCM]-- HOST BT_WAKE=LOW --\n");
 			}
 			spin_unlock_irqrestore(&u->lock, tflags);
 			break;
@@ -1697,7 +1695,7 @@ static int tegra_ioctl(struct uart_port *u, unsigned int cmd, unsigned long arg)
 						gpio_set_value(tegra_uport->bt_wakeup_pin, T_HIGH);
 						tegra_uport->bt_wakeup_level = 1;
 						tegra_uport->bt_wakeup_assert_inadvance = 0;
-						dev_info(u->dev, "[SER_BRCM] BT_WAKE=HIGH\n");
+						dev_info(u->dev, "[SER_BRCM]-- HOST BT_WAKE=HIGH --\n");
 				}
 			}
 
@@ -1988,15 +1986,12 @@ static int tegra_uart_suspend(struct platform_device *pdev, pm_message_t state)
 	struct tegra_uart_port *t = platform_get_drvdata(pdev);
 	struct uart_port *u;
 
-#ifdef BCM_BT_DEBUG
 	dev_info(t->uport.dev, "[SER_BRCM] +tegra_uart_suspend start\n");
-#endif //BCM_BT_DEBUG
 
 	if (pdev->id < 0 || pdev->id > tegra_uart_driver.nr)
 		pr_err("Invalid Uart instance (%d)\n", pdev->id);
 
 	u = &t->uport;
-	dev_dbg(t->uport.dev, "tegra_uart_suspend called\n");
 
 	/* enable clock before calling suspend so that controller
 	   register can be accessible */
@@ -2024,9 +2019,7 @@ static int tegra_uart_suspend(struct platform_device *pdev, pm_message_t state)
 	uart_suspend_port(&tegra_uart_driver, u);
 	t->uart_state = TEGRA_UART_SUSPEND;
 
-#ifdef BCM_BT_DEBUG	/* bt for brcm */
 	dev_info(t->uport.dev, "[SER_BRCM] -tegra_uart_suspend end\n");
-#endif //BCM_BT_DEBUG
 
 	return 0;
 }
@@ -2036,15 +2029,12 @@ static int tegra_uart_resume(struct platform_device *pdev)
 	struct tegra_uart_port *t = platform_get_drvdata(pdev);
 	struct uart_port *u;
 
-#ifdef BCM_BT_DEBUG	/* bt for brcm */
 	dev_info(t->uport.dev, "[SER_BRCM] +tegra_uart_resume start\n");
-#endif //BCM_BT_DEBUG
 
 	if (pdev->id < 0 || pdev->id > tegra_uart_driver.nr)
 		pr_err("Invalid Uart instance (%d)\n", pdev->id);
 
 	u = &t->uport;
-	dev_dbg(t->uport.dev, "tegra_uart_resume called\n");
 
 #ifdef USE_BCM_BT_CHIP	/* bt for brcm */
 

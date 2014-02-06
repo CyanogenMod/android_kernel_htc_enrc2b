@@ -5575,6 +5575,9 @@ dhdsdio_hostmail(dhd_bus_t *bus)
 	if (hmb_data & HMB_DATA_FWHALT) {
 		DHD_ERROR(("INTERNAL ERROR: FIRMWARE HALTED\n"));
 		dhdsdio_checkdied(bus, NULL, 0);
+		bus->dhd->busstate = DHD_BUS_DOWN;
+		bus->intstatus = 0;
+		dhd_info_send_hang_message(bus->dhd);
 	}
 #endif /* DHD_DEBUG */
 
@@ -6645,8 +6648,16 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
-	mutex_unlock(&_dhd_sdio_mutex_lock_);
-	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+	//2012-11-09 add ++++
+	if (mutex_is_locked(&_dhd_sdio_mutex_lock_) == 0) {
+		DHD_ERROR(("%s : no mutex held. \n", __FUNCTION__));
+	}
+	else {
+		DHD_ERROR(("%s : mutex is locked!. wait for unlocking\n", __FUNCTION__));
+		mutex_unlock(&_dhd_sdio_mutex_lock_);
+		DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+	}
+	//2012-11-09 add ----
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
 	return bus;
 
@@ -6655,8 +6666,16 @@ fail:
 
 forcereturn:
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
-	mutex_unlock(&_dhd_sdio_mutex_lock_);
-	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+	//2012-11-09 add ++++
+	if (mutex_is_locked(&_dhd_sdio_mutex_lock_) == 0) {
+		DHD_ERROR(("%s : no mutex held. \n", __FUNCTION__));
+	}
+	else {
+		DHD_ERROR(("%s : mutex is locked!. wait for unlocking\n", __FUNCTION__));
+		mutex_unlock(&_dhd_sdio_mutex_lock_);
+		DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
+	}
+	//2012-11-09 add ----
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
 	return NULL;
 }

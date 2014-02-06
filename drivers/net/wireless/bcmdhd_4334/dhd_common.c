@@ -287,14 +287,9 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifindex, wl_ioctl_t *ioc, void *buf, int le
 	dhd_os_proto_block(dhd_pub);
 
 	ret = dhd_prot_ioctl(dhd_pub, ifindex, ioc, buf, len);
-#if defined(CUSTOMER_HW4)
-	if (!ret || ret == -ETIMEDOUT)
-#else
-	if (!ret)
-#endif /* CUSTOMER_HW4 */
-		/* Send hang event only if dhd_open() was success */
-		if (dhd_pub->up)
-			dhd_os_check_hang(dhd_pub, ifindex, ret);
+	if ((ret || ret == -ETIMEDOUT) && dhd_pub->up){
+		dhd_os_check_hang(dhd_pub, ifindex, ret);
+    }
 
 	dhd_os_proto_unblock(dhd_pub);
 
@@ -1262,6 +1257,7 @@ extern struct net_device *ap_net_dev;
 /* HTC_CSP_START */
 extern bool hasDLNA;
 extern char ip_str[32];
+extern int is_screen_off;
 /* HTC_CSP_END */
 int dhd_set_pktfilter(dhd_pub_t * dhd, int add, int id, int offset, char *mask, char *pattern)
 {
@@ -1299,14 +1295,6 @@ int dhd_set_pktfilter(dhd_pub_t * dhd, int add, int id, int offset, char *mask, 
 	/* delete it */
 	bcm_mkiovar("pkt_filter_delete", (char *)&pkt_id, 4, buf, sizeof(buf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE, 0);
-//BRCM APSTA START
-#if defined(APSTA_CONCURRENT) && defined(SOFTAP)
-	if ( ap_net_dev ) {
-		printf("%s: apsta concurrent running, just add but don't enable rule id:%d\n", __FUNCTION__, pkt_id);
-		return 0;
-	}	
-#endif
-//BRCM APSTA END
 
 	if (!add) {
 		return 0;
@@ -1348,6 +1336,11 @@ int dhd_set_pktfilter(dhd_pub_t * dhd, int add, int id, int offset, char *mask, 
 		}
 	}
 #endif
+    /* if wifi connected while screen off, we need update dtim to 3 */
+	if (add == 1 && id == 101) {
+		printf("Update dtim after connected AP, screen_off:%d\n", is_screen_off);
+		dhdhtc_update_dtim_listen_interval(is_screen_off);
+	}
 /* HTC_CSP_END */
 
 	/* Parse pattern filter pattern. */
@@ -1370,6 +1363,15 @@ int dhd_set_pktfilter(dhd_pub_t * dhd, int add, int id, int offset, char *mask, 
 
 	enable_parm.id = htod32(pkt_id);
 	enable_parm.enable = htod32(1);
+//BRCM APSTA START
+#if defined(APSTA_CONCURRENT) && defined(SOFTAP)
+	if ( ap_net_dev ) {
+		printf("%s: apsta concurrent running, just add but don't enable rule id:%d\n", __FUNCTION__, pkt_id);
+		enable_parm.enable = htod32(0);
+	} else
+		enable_parm.enable = htod32(1);
+#endif
+//BRCM APSTA END
 	bcm_mkiovar("pkt_filter_enable", (char *)&enable_parm,
 		sizeof(wl_pkt_filter_enable_t), buf, sizeof(buf));
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_VAR, buf, sizeof(buf), TRUE , 0);
