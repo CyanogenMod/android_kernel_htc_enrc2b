@@ -1,20 +1,20 @@
 /*
- * Copyright (C) 2011 NVIDIA, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
- * 02111-1307, USA
- */
+* Copyright (C) 2011 NVIDIA, Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program; if not, write to the Free Software
+* Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+* 02111-1307, USA
+*/
 
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -24,7 +24,7 @@
 #include "board.h"
 
 
-static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] = 
+static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] =
 {
 	{
 		0x32,       /* Rev 3.2 */
@@ -118,7 +118,7 @@ static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] =
 			0x00000000, /* EMC_CTT_DURATION */
 			0x800001c5, /* EMC_DYN_SELF_REF_CONTROL */
 			0x00030003, /* MC_EMEM_ARB_CFG */
-			0xc0000010, /* MC_EMEM_ARB_OUTSTANDING_REQ */
+			0xc0000030, /* MC_EMEM_ARB_OUTSTANDING_REQ */
 			0x00000001, /* MC_EMEM_ARB_TIMING_RCD */
 			0x00000001, /* MC_EMEM_ARB_TIMING_RP */
 			0x00000002, /* MC_EMEM_ARB_TIMING_RC */
@@ -238,7 +238,7 @@ static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] =
 			0x00000000, /* EMC_CTT_DURATION */
 			0x80000287, /* EMC_DYN_SELF_REF_CONTROL */
 			0x00010003, /* MC_EMEM_ARB_CFG */
-			0xc0000010, /* MC_EMEM_ARB_OUTSTANDING_REQ */
+			0xc0000020, /* MC_EMEM_ARB_OUTSTANDING_REQ */
 			0x00000001, /* MC_EMEM_ARB_TIMING_RCD */
 			0x00000001, /* MC_EMEM_ARB_TIMING_RP */
 			0x00000002, /* MC_EMEM_ARB_TIMING_RC */
@@ -358,7 +358,7 @@ static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] =
 			0x00000000, /* EMC_CTT_DURATION */
 			0x8000040b, /* EMC_DYN_SELF_REF_CONTROL */
 			0x00000003, /* MC_EMEM_ARB_CFG */
-			0xc0000018, /* MC_EMEM_ARB_OUTSTANDING_REQ */
+			0xc0000020, /* MC_EMEM_ARB_OUTSTANDING_REQ */
 			0x00000001, /* MC_EMEM_ARB_TIMING_RCD */
 			0x00000001, /* MC_EMEM_ARB_TIMING_RP */
 			0x00000003, /* MC_EMEM_ARB_TIMING_RC */
@@ -478,7 +478,7 @@ static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] =
 			0x00000000, /* EMC_CTT_DURATION */
 			0x80000713, /* EMC_DYN_SELF_REF_CONTROL */
 			0x00000006, /* MC_EMEM_ARB_CFG */
-			0xc0000025, /* MC_EMEM_ARB_OUTSTANDING_REQ */
+			0xc0000020, /* MC_EMEM_ARB_OUTSTANDING_REQ */
 			0x00000001, /* MC_EMEM_ARB_TIMING_RCD */
 			0x00000001, /* MC_EMEM_ARB_TIMING_RP */
 			0x00000006, /* MC_EMEM_ARB_TIMING_RC */
@@ -598,7 +598,7 @@ static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] =
 			0x00000000, /* EMC_CTT_DURATION */
 			0x800008ee, /* EMC_DYN_SELF_REF_CONTROL */
 			0x00000008, /* MC_EMEM_ARB_CFG */
-			0xc0000030, /* MC_EMEM_ARB_OUTSTANDING_REQ */
+			0xc0000020, /* MC_EMEM_ARB_OUTSTANDING_REQ */
 			0x00000001, /* MC_EMEM_ARB_TIMING_RCD */
 			0x00000002, /* MC_EMEM_ARB_TIMING_RP */
 			0x00000008, /* MC_EMEM_ARB_TIMING_RC */
@@ -838,7 +838,7 @@ static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] =
 			0x00000000, /* EMC_CTT_DURATION */
 			0x80000dff, /* EMC_DYN_SELF_REF_CONTROL */
 			0x0000000d, /* MC_EMEM_ARB_CFG */
-			0xc000004f, /* MC_EMEM_ARB_OUTSTANDING_REQ */
+			0xc0000020, /* MC_EMEM_ARB_OUTSTANDING_REQ */
 			0x00000002, /* MC_EMEM_ARB_TIMING_RCD */
 			0x00000003, /* MC_EMEM_ARB_TIMING_RP */
 			0x0000000d, /* MC_EMEM_ARB_TIMING_RC */
@@ -958,7 +958,7 @@ static const struct tegra_emc_table enrc2b_emc_tables_h5tc2g_evt_533[] =
 			0x00000000, /* EMC_CTT_DURATION */
 			0x800010d9, /* EMC_DYN_SELF_REF_CONTROL */
 			0x0000000f, /* MC_EMEM_ARB_CFG */
-			0xc0000060, /* MC_EMEM_ARB_OUTSTANDING_REQ */
+			0xc0000020, /* MC_EMEM_ARB_OUTSTANDING_REQ */
 			0x00000003, /* MC_EMEM_ARB_TIMING_RCD */
 			0x00000004, /* MC_EMEM_ARB_TIMING_RP */
 			0x00000010, /* MC_EMEM_ARB_TIMING_RC */
@@ -993,7 +993,7 @@ int enrc2b_emc_init(void)
 	struct board_info board_info;
 
 		tegra_init_emc(enrc2b_emc_tables_h5tc2g_evt_533,
-			       ARRAY_SIZE(enrc2b_emc_tables_h5tc2g_evt_533));
+						ARRAY_SIZE(enrc2b_emc_tables_h5tc2g_evt_533));
 
 	return 0;
 }
