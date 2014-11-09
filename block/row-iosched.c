@@ -151,7 +151,6 @@ struct idling_data {
  */
 struct row_data {
 	struct request_queue		*dispatch_queue;
-
 	struct {
 		struct row_queue	rqueue;
 		int			disp_quantum;
@@ -355,7 +354,6 @@ static void row_remove_request(struct request_queue *q,
 			       struct request *rq)
 {
 	struct row_data *rd = (struct row_data *)q->elevator->elevator_data;
-
 	rq_fifo_clear(rq);
 	rd->nr_reqs[rq_data_dir(rq)]--;
 }
