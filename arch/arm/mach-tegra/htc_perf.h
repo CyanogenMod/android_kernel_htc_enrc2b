@@ -3,5 +3,3 @@
 void speedupCPU(int on);
 void restoreCap(int on);
 #endif
-
-

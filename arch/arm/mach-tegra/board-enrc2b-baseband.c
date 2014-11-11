@@ -182,12 +182,11 @@ static void baseband_phy_on(void)
 		gpio_set_value(AP2MDM_ACK2, 0);
 
 		if (gpio_is_valid(MDM2AP_ACK2)) {
-			int retry = 60;
+			int retry = 20000;
 			while (retry) {
 				/* poll phy_restore_gpio high */
 				if (gpio_get_value(MDM2AP_ACK2))
 					break;
-				msleep(50);
 				retry--;
 			}
 
@@ -213,7 +212,7 @@ static void baseband_reset(void)
 	/* Initiate power cycle on baseband sub system */
 	pr_info("%s\n", __func__);
 	gpio_set_value(MODEM_PWR_ON, 0);
-	msleep(200);
+	mdelay(200);
 	gpio_set_value(MODEM_PWR_ON, 1);
 }
 

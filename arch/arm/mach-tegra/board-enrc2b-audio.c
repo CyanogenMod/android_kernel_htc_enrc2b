@@ -65,12 +65,12 @@ static void aic3008_amp_powerup(int type)
 	switch (type) {
 	case HEADSET_AMP:
 		if (pcbid >= PROJECT_PHASE_XB || board_get_sku_tag() == 0x34600) {
-			msleep(100);
+			mdelay(50);
 			power_config("AUD_HEADPHONE_EN", TEGRA_GPIO_PP7, GPIO_OUTPUT);
 		}
 		break;
 	case SPEAKER_AMP:
-		msleep(100);
+		mdelay(50);
 		if (pcbid >= PROJECT_PHASE_XB || board_get_sku_tag() == 0x34600) {
 #if (defined(CONFIG_SND_AMP_TFA9887))
 			set_tfa9887_spkamp(1, 0);
@@ -80,7 +80,7 @@ static void aic3008_amp_powerup(int type)
 		}
 		break;
 	case DOCK_AMP:
-		msleep(100);
+		mdelay(50);
 		if (pcbid >= PROJECT_PHASE_XB || board_get_sku_tag() == 0x34600) {
 		} else {
 			power_config("AUD_LINEOUT_EN", TEGRA_GPIO_PP7, GPIO_OUTPUT);
