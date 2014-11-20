@@ -7,7 +7,6 @@
  * published by the Free Software Foundation.
 */
 
-#include <linux/module.h>
 #include <sound/soc.h>
 
 #include "s3c24xx_simtec.h"

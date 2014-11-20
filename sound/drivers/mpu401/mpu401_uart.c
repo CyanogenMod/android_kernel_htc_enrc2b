@@ -33,7 +33,6 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/ioport.h>
-#include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/errno.h>
 #include <sound/core.h>

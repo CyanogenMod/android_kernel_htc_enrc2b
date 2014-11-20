@@ -24,7 +24,6 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
-#include <linux/module.h>
 
 #include <sound/asound.h>
 #include <sound/control.h>

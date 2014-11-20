@@ -29,7 +29,6 @@
 #include <linux/slab.h>
 #include <linux/pci.h>
 #include <linux/dmi.h>
-#include <linux/module.h>
 #include <sound/core.h>
 #include <sound/asoundef.h>
 #include <sound/jack.h>

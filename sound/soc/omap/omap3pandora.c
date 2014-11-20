@@ -24,7 +24,6 @@
 #include <linux/gpio.h>
 #include <linux/delay.h>
 #include <linux/regulator/consumer.h>
-#include <linux/module.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>

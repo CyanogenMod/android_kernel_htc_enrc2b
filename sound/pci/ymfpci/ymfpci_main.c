@@ -27,7 +27,6 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/mutex.h>
-#include <linux/module.h>
 
 #include <sound/core.h>
 #include <sound/control.h>

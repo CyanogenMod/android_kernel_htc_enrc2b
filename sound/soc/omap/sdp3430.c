@@ -37,7 +37,6 @@
 
 /* Register descriptions for twl4030 codec part */
 #include <linux/mfd/twl4030-audio.h>
-#include <linux/module.h>
 
 #include "omap-mcbsp.h"
 #include "omap-pcm.h"

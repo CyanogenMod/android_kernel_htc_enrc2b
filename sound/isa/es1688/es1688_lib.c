@@ -24,7 +24,6 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/ioport.h>
-#include <linux/module.h>
 #include <sound/core.h>
 #include <sound/es1688.h>
 #include <sound/initval.h>

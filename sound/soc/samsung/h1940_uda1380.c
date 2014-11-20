@@ -15,7 +15,6 @@
 
 #include <linux/types.h>
 #include <linux/gpio.h>
-#include <linux/module.h>
 
 #include <sound/soc.h>
 #include <sound/jack.h>

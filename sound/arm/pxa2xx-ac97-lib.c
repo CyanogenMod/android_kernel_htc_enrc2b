@@ -16,7 +16,6 @@
 #include <linux/interrupt.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
-#include <linux/module.h>
 
 #include <sound/ac97_codec.h>
 #include <sound/pxa2xx-lib.h>
