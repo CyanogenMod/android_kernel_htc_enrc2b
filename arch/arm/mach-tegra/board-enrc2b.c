@@ -2438,7 +2438,7 @@ static void __init enrc2b_init(void)
 static void __init enrc2b_reserve(void)
 {
 #if defined(CONFIG_NVMAP_CONVERT_CARVEOUT_TO_IOVMM)
-	tegra_reserve(0, SZ_4M, 0);
+	tegra_reserve(0, SZ_8M, 0);
 #else
 	tegra_reserve(SZ_128M, SZ_4M, SZ_8M);
 #endif
