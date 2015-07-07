@@ -455,6 +455,8 @@ csum_copy_err:
 
 	/* starting over for a new packet, but check if we need to yield */
 	cond_resched();
+
+	/* starting over for a new packet */
 	msg->msg_flags &= ~MSG_TRUNC;
 	goto try_again;
 }
